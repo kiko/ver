@@ -1,5 +1,5 @@
 module VER
-  class View < Tk::Frame
+  class View < Tk::Tile::LabelFrame
     autoload :Entry,   'ver/view/entry'
     autoload :List,    'ver/view/list'
     autoload :Console, 'ver/view/console'
@@ -8,11 +8,13 @@ module VER
 
     def initialize(layout, options = {})
       peer = options.delete(:peer)
+      options[:style] ||= VER.obtain_style_name('View', 'TFrame')
       super
       @layout = layout
       @text = @status = @ybar = @xbar = nil
-      configure takefocus: false
       setup(peer)
+      configure takefocus: false, labelwidget: @status, labelanchor: :sw
+      @status.configure width: 1000
     end
 
     # +-------+---+
@@ -103,9 +105,6 @@ module VER
       %w[Modified Movement].each do |name|
         @text.bind("<<#{name}>>"){|event| __send__("on_#{name.downcase}", event) }
       end
-
-      @text.bind('<FocusIn>'){|event| on_focus(event) }
-      bind('<FocusIn>'){|event| on_focus(event) }
     end
 
     def open_path(path, line = 1)
@@ -128,13 +127,6 @@ module VER
       @text.see :insert
       # @text.refresh_highlight
       @text.status_projection(@status)
-    end
-
-    def on_focus(event)
-      Dir.chdir(text.filename.dirname.to_s) if text.options.auto_chdir
-      text.focus
-      text.set_window_title
-      text.see(:insert)
     end
 
     def focus
@@ -198,9 +190,17 @@ module VER
     end
 
     def destroy
+      style_name = style
       [@text, @ybar, @xbar, @status].compact.each(&:destroy)
 
       super
+    ensure
+      VER.return_style_name(style_name)
+    end
+
+    def style
+      style = cget(:style)
+      style.first if style
     end
 
     def filename

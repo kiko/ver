@@ -63,6 +63,27 @@ module VER
       @pristine = true
       @syntax = nil
       @encoding = Encoding.default_internal
+
+      bind('<FocusIn>'){|event|
+        on_focus_in(event)
+        Tk.callback_break
+      }
+
+      bind('<FocusOut>'){|event|
+        on_focus_out(event)
+        Tk.callback_break
+      }
+    end
+
+    def on_focus_in(event)
+      Dir.chdir(filename.dirname.to_s) if options.auto_chdir
+      set_window_title
+      see(:insert)
+      Tk::Tile::Style.configure(view.style, border: 1, background: '#f00')
+    end
+
+    def on_focus_out(event)
+      Tk::Tile::Style.configure(view.style, border: 1, background: '#fff')
     end
 
     def pristine?
