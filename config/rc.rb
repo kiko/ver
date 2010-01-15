@@ -18,7 +18,7 @@ VER.options.dsl do
     :emergency_exit, "<Control-q>"
 
   o "Default Font for all widgets",
-    :font, "TkFixedFont 10"
+    :font, "terminus 9"
 
   o "Fork off on startup to avoid dying with the terminal",
     :fork, true
@@ -27,7 +27,7 @@ VER.options.dsl do
     :eventmachine, false
 
   o "Change directory to directory of currently open buffer",
-    :auto_chdir, false
+    :auto_chdir, true
 
   o "Tk Tile Theme",
     :tk_theme, 'clam'
@@ -74,3 +74,5 @@ VER.options.dsl do
   o "Width at which lines are cut when autofill is active",
     :auto_fill_width, 78
 end
+
+VER.plugin :autosave
