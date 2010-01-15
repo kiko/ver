@@ -7,7 +7,7 @@ module VER
 
       def completed=(values)
         path = Pathname(values.first)
-        self.value = path.relative_path_from(@root).to_s
+        self.value = path.relative_path_from(Pathname(Dir.pwd)).to_s
       end
 
       def setup
