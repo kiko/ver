@@ -10,7 +10,7 @@
 #   VER.plugin :autosave
 
 VER.startup_hook do
-  VER.when_inactive_for 1000 do
+  VER.when_inactive_for 500 do
     VER.layout.views.each do |view|
       text = view.text
 
