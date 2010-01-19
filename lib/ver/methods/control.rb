@@ -1,51 +1,78 @@
-module VER
-  module Methods
-    module Control
-      def source_buffer
-        VER.message "Source #{filename}"
-        load filename.to_s
+module VER::Methods
+  module Control
+    class << self
+      def start(text)
+        clean_line(text, :insert)
       end
 
-      def cursor_vertical_top
-        insert_line = count('1.0', 'insert', :displaylines)
-        last_line = count('1.0', 'end', :displaylines)
-        fraction = ((100.0 / last_line) * insert_line) / 100
-        yview_moveto(fraction)
+      def insert_at(text, motion, *count)
+        Move.send(motion, text, *count)
+        text.mode = :insert
       end
 
-      def cursor_vertical_top_sol
-        cursor_vertical_top
-        start_of_line
+      def insert_indented_newline_above(text)
+        Insert.insert_indented_newline_above(text)
       end
 
-      def cursor_vertical_center
-        insert_line = count('1.0', 'insert', :displaylines)
-        last_line = count('1.0', 'end', :displaylines)
-        shown_lines = count('@0,0', "@0,#{winfo_height}", :displaylines)
-        fraction = ((100.0 / last_line) * (insert_line - (shown_lines / 2))) / 100
-        yview_moveto(fraction)
+      def insert_indented_newline_below(text)
+        Insert.insert_indented_newline_below(text)
       end
 
-      def cursor_vertical_center_sol
-        cursor_vertical_center
-        start_of_line
+      def open_file_under_cursor(text)
+        Open.open_file_under_cursor(text)
       end
 
-      def cursor_vertical_bottom
-        insert_line = count('1.0', 'insert', :displaylines) + 1
-        last_line = count('1.0', 'end', :displaylines)
-        shown_lines = count('@0,0', "@0,#{winfo_height}", :displaylines)
-        fraction = ((100.0 / last_line) * (insert_line - shown_lines)) / 100
-        yview_moveto(fraction)
+      def source_buffer(text)
+        VER.message("Source #{text.filename}")
+        load(text.filename.to_s)
       end
 
-      def cursor_vertical_bottom_sol
-        cursor_vertical_bottom
-        start_of_line
+      def cursor_vertical_top(text)
+        insert = text.count('1.0', 'insert', :displaylines)
+        last   = text.count('1.0', 'end', :displaylines)
+
+        fraction = ((100.0 / last) * insert) / 100
+
+        text.yview_moveto(fraction)
       end
 
-      def chdir
-        status_ask 'Change to: ' do |path|
+      def cursor_vertical_top_sol(text)
+        cursor_vertical_top(text)
+        Move.start_of_line(text)
+      end
+
+      def cursor_vertical_center(text)
+        insert = text.count('1.0', 'insert', :displaylines)
+        last   = text.count('1.0', 'end', :displaylines)
+        shown  = text.count('@0,0', "@0,#{winfo_height}", :displaylines)
+
+        fraction = ((100.0 / last) * (insert - (shown / 2))) / 100
+
+        text.yview_moveto(fraction)
+      end
+
+      def cursor_vertical_center_sol(text)
+        cursor_vertical_center(text)
+        start_of_line(text)
+      end
+
+      def cursor_vertical_bottom(text)
+        insert = text.count('1.0', 'insert', :displaylines) + 1
+        last   = text.count('1.0', 'end', :displaylines)
+        shown  = text.count('@0,0', "@0,#{winfo_height}", :displaylines)
+
+        fraction = ((100.0 / last) * (insert - shown)) / 100
+
+        text.yview_moveto(fraction)
+      end
+
+      def cursor_vertical_bottom_sol(text)
+        cursor_vertical_bottom(text)
+        start_of_line(text)
+      end
+
+      def chdir(text)
+        text.status_ask 'Change to: ' do |path|
           return unless File.directory?(path.to_s)
           Dir.chdir(path)
         end
@@ -54,11 +81,11 @@ module VER
       # Toggle case of the character under the cursor up to +count+ characters
       # forward (+count+ is inclusive the first character).
       # This only works for alphabetic ASCII characters, no other encodings.
-      def toggle_case(count = 1)
+      def toggle_case(text, count = 1)
         from, to = 'insert', "insert + #{count} chars"
-        chunk = get(from, to)
+        chunk = text.get(from, to)
         chunk.tr!('a-zA-Z', 'A-Za-z')
-        replace(from, to, chunk)
+        text.replace(from, to, chunk)
       end
 
       REPEAT_BREAK_CMD = [
@@ -72,26 +99,26 @@ module VER
         :search,
       ]
 
-      def repeat_command(count = 1)
+      def repeat_command(text, count = 1)
         bundle = []
-        keymap.execute_history.reverse_each do |mode, widget, cmd, arg|
+        text.keymap.execute_history.reverse_each do |mode, widget, action, arg|
           if bundle.empty?
-            next if REPEAT_BREAK_CMD.include?(cmd)
+            next if REPEAT_BREAK_CMD.include?(action.method)
             next if REPEAT_BREAK_MODE.include?(mode.name)
           else
-            break if REPEAT_BREAK_CMD.include?(cmd)
+            break if REPEAT_BREAK_CMD.include?(action.method)
             break if REPEAT_BREAK_MODE.include?(mode.name)
           end
 
-          bundle << [mode, widget, cmd, arg]
+          bundle << [mode, widget, action, arg]
         end
 
         bundle.reverse!
 
         count.times do
-          bundle.each do |mode, widget, cmd, arg|
+          bundle.each do |mode, widget, action, arg|
             # p [cmd, arg]
-            mode.execute_without_history(widget, cmd, arg)
+            mode.execute_without_history(widget, action, arg)
           end
         end
       end
@@ -249,12 +276,12 @@ module VER
       end
 
       # Substitute over all lines of the buffer
-      def gsub(regexp, with)
+      def gsub(text, regexp, with)
         total = 0
-        undo_record do |record|
-          index('1.0').upto(index('end')) do |index|
+        Undo.record text do |record|
+          text.index('1.0').upto(text.index('end')) do |index|
             lineend = index.lineend
-            line = get(index, lineend)
+            line = text.get(index, lineend)
 
             if line.gsub!(regexp, with)
               record.replace(index, lineend, line)
@@ -267,44 +294,18 @@ module VER
       end
 
       # Substitute on current line
-      def sub(regexp, with)
-        linestart = index('insert linestart')
+      def sub(text, regexp, with)
+        linestart = text.index('insert linestart')
         lineend = linestart.lineend
-        line = get(linestart, lineend)
+        line = text.get(linestart, lineend)
 
         if line.sub!(regexp, with)
-          replace(linestart, lineend, line)
+          text.replace(linestart, lineend, line)
         end
       end
 
-      def open_grep_list
-        View::List::Grep.new self do |file, line|
-          view.find_or_create(file, line)
-        end
-      end
-
-      def grep_buffer
-        View::List::Grep.new self, filename do |file, line|
-          view.find_or_create(file, line)
-        end
-      end
-
-      def grep_buffers
-        glob = '{' << layout.views.map{|v| v.text.filename }.join(',') << '}'
-
-        View::List::Grep.new self, glob do |file, line|
-          view.find_or_create(file, line)
-        end
-      end
-
-      def open_method_list
-        View::List::Methods.new self do |file, line|
-          view.find_or_create(file, line)
-        end
-      end
-
-      def executor
-        Executor.new(self)
+      def executor(text)
+        VER::Executor.new(text)
       end
 
       # TODO: make this better?
@@ -334,22 +335,13 @@ module VER
         self.methods.grep(regexp).sort_by{|sym| sym =~ regexp }
       end
 
-      def open_console
-        View::Console.new(self)
-      end
-
-      def open_terminal
-        require 'ver/view/term'
-        View::Terminal.new(self)
-      end
-
-      def wrap_line
-        text = get('insert linestart', 'insert lineend')
-        textwidth = options[:textwidth]
-        lines = wrap_lines_of(text, textwidth).join("\n")
+      def wrap_line(text)
+        content = text.get('insert linestart', 'insert lineend')
+        textwidth = text.options.textwidth
+        lines = wrap_lines_of(content, textwidth).join("\n")
         lines.rstrip!
 
-        replace('insert linestart', 'insert lineend', lines)
+        text.replace('insert linestart', 'insert lineend', lines)
       end
 
       def theme_switch
@@ -364,38 +356,28 @@ module VER
         View::List::Syntax.new(self){|name| load_syntax(name) }
       end
 
-      def status_evaluate
-        status_ask 'Eval expression: ' do |term|
-          begin
-            eval(term)
-          rescue Exception => ex
-            ex
-          end
-        end
-      end
-
-      def smart_evaluate
-        if sel = tag_ranges(:sel)
+      def smart_evaluate(text)
+        if sel = text.tag_ranges(:sel)
           from, to = sel.first
-          return selection_evaluate if from && to
+          return Selection.evaluate(text) if from && to
         end
 
-        line_evaluate
+        line_evaluate(text)
       end
 
-      def line_evaluate
-        text = get('insert linestart', 'insert lineend')
-        stdout_capture_evaluate(text) do |res,out|
-          insert("insert lineend", "\n%s%p" % [out, res] )
+      def line_evaluate(text)
+        content = text.get('insert linestart', 'insert lineend')
+        stdout_capture_evaluate(content, text.filename) do |res,out|
+          text.insert("insert lineend", "\n%s%p" % [out, res] )
         end
       end
 
-      def stdout_capture_evaluate(code)
+      def stdout_capture_evaluate(code, file)
         begin
           old_stdout = $stdout.dup
           rd, wr = IO.pipe
           $stdout.reopen(wr)
-          result = eval(code, nil, filename.to_s)
+          result = eval(code, nil, file.to_s)
           $stdout.reopen old_stdout; wr.close
           stdout = rd.read
 
@@ -414,58 +396,22 @@ module VER
         VER.error(exception)
       end
 
-      def buffer_switch
-        View::List::Buffer.new self do |file|
-          view.find_or_create(file) if File.exists?(file)
-        end
-      end
-
-      def window_switch(count = nil)
-        if count
-          # p count: count
-        else
-          View::List::Window.new self do |view|
-            view.push_top
-            view.focus
-          end
-        end
-      end
-
-      def file_open_popup
-        filetypes = [
-          ['ALL Files',  '*'    ],
-          ['Text Files', '*.txt'],
-        ]
-
-        fpath = Tk.get_open_file(filetypes: filetypes)
-
-        return unless fpath
-
-        view.find_or_create(fpath)
-      end
-
-      def file_open_fuzzy
-        View::List::FuzzyFileFinder.new self do |path|
-          view.find_or_create(path)
-        end
-      end
-
-      def join_lines
-        start_of_next_line = search(/\S/, 'insert lineend').first
-        replace('insert lineend', start_of_next_line, ' ')
+      def join_lines(text)
+        start_of_next_line = text.search(/\S/, 'insert lineend').first
+        text.replace('insert lineend', start_of_next_line, ' ')
       rescue RuntimeError => exception
         return if exception.message =~ /Index "\d+\.\d+" before "insert lineend" in the text/
         Kernel.raise exception
       end
 
-      def replace_char
+      def replace_char(text)
         VER.message(
           'Enter character to replace the character under the cursor with')
 
-        keymap.gets 1 do |char|
+        text.keymap.gets 1 do |char|
           if char.size == 1
-            replace('insert', 'insert + 1 chars', char)
-            backward_char
+            text.replace('insert', 'insert + 1 chars', char)
+            Move.prev_char(text)
             VER.message "replaced #{char.size} chars"
           else
             VER.message 'replace aborted'
@@ -473,19 +419,19 @@ module VER
         end
       end
 
-      def indent_line(count = 1)
-        indent = (' ' * options[:shiftwidth] * count)
-        insert('insert linestart', indent)
+      def indent_line(text, count = 1)
+        indent = (' ' * text.options[:shiftwidth] * count)
+        text.insert('insert linestart', indent)
       end
 
-      def unindent_line(count = 1)
-        indent = ' ' * options[:shiftwidth]
+      def unindent_line(text, count = 1)
+        indent = ' ' * text.options[:shiftwidth]
         replace_from = 'insert linestart'
         replace_to = "insert linestart + #{indent.size} chars"
 
-        undo_record do |record|
+        Undo.record text do |record|
           count.times do
-            line = get('insert linestart', 'insert lineend')
+            line = text.get('insert linestart', 'insert lineend')
 
             return unless line.start_with?(indent)
 
@@ -494,34 +440,23 @@ module VER
         end
       end
 
-      def clean_line(index, record = self)
-        index = index(index)
+      def clean_line(text, index, record = text)
+        index = text.index(index)
         from, to = index.linestart, index.lineend
-        line = get(from, to)
+        line = text.get(from, to)
         bare = line.rstrip
         record.replace(from, to, bare) if bare.empty?
       end
 
-      def start_insert_mode
-        self.mode = :insert
-      end
-
-      def start_control_mode
-        clean_line(:insert)
-        self.mode = :control
-      end
-
-      private
-
-      def wrap_lines_of(text, wrap = 80)
+      def wrap_lines_of(content, wrap = 80)
         Kernel.raise ArgumentError, "+wrap+ must be > 1" unless wrap > 1
         wrap -= 1
 
-        indent = text[/^\s+/] || ''
+        indent = content[/^\s+/] || ''
         indent_size = indent.size
         lines = [indent.dup]
 
-        text.scan(/\S+/) do |chunk|
+        content.scan(/\S+/) do |chunk|
           last = lines.last
           last_size = last.size
           chunk_size = chunk.size
@@ -539,22 +474,6 @@ module VER
         end
 
         lines
-      end
-
-      def status_ask(prompt, options = {}, &callback)
-        @status.ask(prompt, options){|*args|
-          begin
-            callback.call(*args)
-          rescue => ex
-            VER.error(ex)
-          ensure
-            begin
-              focus
-            rescue RuntimeError
-              # might have been destroyed, stay silent
-            end
-          end
-        }
       end
     end
   end

@@ -31,7 +31,6 @@ module VER
       setup_widgets(peer)
       setup_grid
       setup_misc
-      setup_events
     end
 
     def setup_widgets(peer)
@@ -100,32 +99,12 @@ module VER
       @text.view = self
     end
 
-    def setup_events
-      %w[Modified Movement].each do |name|
-        @text.bind("<<#{name}>>"){|event| __send__("on_#{name.downcase}", event) }
-      end
-    end
-
     def open_path(path, line = 1)
-      @text.open_path(path, line)
+      Methods::Open.open_path(text, path, line)
     end
 
     def open_empty
-      @text.open_empty
-    end
-
-    # handling events
-
-    def on_movement(event)
-      @text.see :insert
-      @text.refresh_selection
-      @text.status_projection(@status)
-    end
-
-    def on_modified(event)
-      @text.see :insert
-      # @text.refresh_highlight
-      @text.status_projection(@status)
+      Methods::Open.open_empty(text)
     end
 
     def focus
@@ -145,7 +124,7 @@ module VER
       if found = layout.views.find{|view| view.filename == needle }
         found.push_top
         found.focus
-        found.text.go_line(line) if line
+        Methods::Move.go_line(found.text, line) if line
         yield(found) if block_given?
       else
         create(needle, line, &block)
@@ -153,7 +132,7 @@ module VER
     end
 
     def close
-      text.may_close do
+      Methods::Save.may_close text do
         layout.close_view(self)
       end
     end

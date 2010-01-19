@@ -37,7 +37,7 @@ module VER
   autoload :ExceptionView,       'ver/exception_view'
   autoload :Bookmarks,           'ver/methods/bookmark'
   autoload :Undo,                'ver/undo'
-  autoload :Keymapped,           'ver/keymap'
+  autoload :Keymapped,           'ver/keymap/keymapped'
 
   require 'ver/options'
   @options = Options.new(:ver)
@@ -177,6 +177,16 @@ module VER
     @cancel_blocks[block] = false
     Tk::After.idle(&block)
     block
+  end
+
+  def defer
+    Tk::After.idle do
+      begin
+        yield
+      rescue Exception => ex
+        VER.error(ex)
+      end
+    end
   end
 
   def cancel_block(block)

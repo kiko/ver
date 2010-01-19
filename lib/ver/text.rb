@@ -1,29 +1,49 @@
 module VER
   class Text < Tk::Text
     autoload :Index, 'ver/text/index'
-    include Methods, Keymapped
+    include Keymapped
 
     MATCH_WORD_RIGHT =  /[^a-zA-Z0-9]+[a-zA-Z0-9'"{}\[\]\n-]/
     MATCH_WORD_LEFT =  /(^|\b)\S+(\b|$)/
 
-    attr_accessor :view, :status, :project_root, :project_repo
-    attr_reader :filename, :encoding, :pristine, :syntax, :undoer
-
-    # attributes for diverse functionality
-    attr_accessor :selection_mode, :selection_start
+    attr_accessor(:view, :status, :project_root, :project_repo, :encoding,
+                  :undoer, :pristine, :syntax)
+    attr_reader :filename, :options, :snippets, :preferences
 
     def initialize(view, options = {})
       if peer = options.delete(:peer)
         @tag_commands = {}
         @tk_parent = view
+        @store = peer.store_hash
         Tk.execute(peer.tk_pathname, 'peer', 'create', assign_pathname, options)
         self.filename = peer.filename
         configure(peer.configure)
       else
+        @store = Hash.new{|h,k| h[k] = {} }
         super
       end
 
       widget_setup(view)
+    end
+
+    def persisted?
+      return false unless filename
+      return false unless filename.file?
+      require 'digest/md5'
+
+      on_disk = Digest::MD5.hexdigest(filename.read)
+      in_memory = Digest::MD5.hexdigest(value)
+      p on_disk => in_memory
+      on_disk == in_memory
+    end
+
+    None = Object.new
+    def store(namespace, key, value = None)
+      if None == value
+        @store[namespace][key]
+      else
+        @store[namespace][key] = value
+      end
     end
 
     def inspect
@@ -43,10 +63,6 @@ module VER
       self.class.new(view, peer: self)
     end
 
-    def view_peer
-      view.create_peer
-    end
-
     def widget_setup(view)
       self.view = view
       @options = Options.new(:text, VER.options)
@@ -59,20 +75,39 @@ module VER
       apply_mode_style
       setup_tags
 
-      self.selection_start = nil
       @pristine = true
       @syntax = nil
       @encoding = Encoding.default_internal
 
-      bind('<FocusIn>'){|event|
+      event_setup
+    end
+
+    def event_setup
+      bind '<<EnterMode>>' do |event|
+        status_projection(status)
+        apply_mode_style(mode)
+      end
+
+      bind '<<Modified>>' do |event|
+        see :insert
+        status_projection(status)
+      end
+
+      bind '<<Movement>>' do |event|
+        see :insert
+        Methods::Selection.refresh(self)
+        status_projection(status)
+      end
+
+      bind('<FocusIn>') do |event|
         on_focus_in(event)
         Tk.callback_break
-      }
+      end
 
-      bind('<FocusOut>'){|event|
+      bind('<FocusOut>') do |event|
         on_focus_out(event)
         Tk.callback_break
-      }
+      end
     end
 
     def on_focus_in(event)
@@ -121,6 +156,7 @@ module VER
     end
 
     def status_projection(into)
+      return unless into
       format = options.statusline.dup
 
       format.gsub!(/%([[:alpha:]]+)/, '#{\1()}')
@@ -201,7 +237,7 @@ module VER
     def insert(index, string, tag = Tk::None)
       index = index(index) unless index.respond_to?(:to_index)
 
-      undo_record do |record|
+      Methods::Undo.record self do |record|
         record.insert(index, string, tag)
       end
     end
@@ -224,9 +260,13 @@ module VER
       index2 = index(index2) unless index2.respond_to?(:to_index)
       return if index1 == index2
 
-      undo_record do |record|
+      Methods::Undo.record self do |record|
         record.replace(index1, index2, string)
       end
+    end
+
+    def delete(*indices)
+      Methods::Delete.delete(self, *indices)
     end
 
     def fast_tag_add(tag, *indices)
@@ -337,11 +377,40 @@ module VER
       apply_mode_style
     end
 
-    def mode=(name)
-      super
-      undo_separator
-      apply_mode_style(name)
-      status_projection(status) if status
+    def status_ask(prompt, options = {}, &callback)
+      status.ask(prompt, options){|*args|
+        begin
+          callback.call(*args)
+        rescue => ex
+          VER.error(ex)
+        ensure
+          begin
+            focus
+          rescue RuntimeError
+            # might have been destroyed, stay silent
+          end
+        end
+      }
+    end
+
+    def load_preferences
+      return unless @syntax
+
+      name = @syntax.name
+      return unless file = VER.find_in_loadpath("preferences/#{name}.rb")
+      @preferences = eval(file.read)
+    rescue Errno::ENOENT, TypeError => ex
+      VER.error(ex)
+    end
+
+    def load_snippets
+      return unless @syntax
+
+      name = @syntax.name
+      return unless file = VER.find_in_loadpath("snippets/#{name}.rb")
+      @snippets = eval(file.read)
+    rescue Errno::ENOENT, TypeError => ex
+      VER.error(ex)
     end
 
     private
@@ -370,26 +439,6 @@ module VER
         fieldbackground: color,
         foreground: Theme.invert_rgb(color)
       )
-    end
-
-    def load_preferences
-      return unless @syntax
-
-      name = @syntax.name
-      return unless file = VER.find_in_loadpath("preferences/#{name}.rb")
-      @preferences = eval(file.read)
-    rescue Errno::ENOENT, TypeError => ex
-      VER.error(ex)
-    end
-
-    def load_snippets
-      return unless @syntax
-
-      name = @syntax.name
-      return unless file = VER.find_in_loadpath("snippets/#{name}.rb")
-      @snippets = eval(file.read)
-    rescue Errno::ENOENT, TypeError => ex
-      VER.error(ex)
     end
 
     def setup_tags
@@ -432,16 +481,6 @@ module VER
 
     def tag_all_trailing_whitespace(given_options = {})
       tag_all_matching('invalid.trailing-whitespace', /[ \t]+$/, given_options)
-    end
-
-    def defer
-      Tk::After.idle do
-        begin
-          yield
-        rescue Exception => ex
-          VER.error(ex)
-        end
-      end
     end
 
     def font(given_options = nil)

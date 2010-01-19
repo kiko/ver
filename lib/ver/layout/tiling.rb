@@ -3,7 +3,6 @@ module VER
     autoload :CommonTiling, 'ver/layout/tiling/common'
     autoload :HorizontalTiling, 'ver/layout/tiling/horizontal'
     autoload :VerticalTiling, 'ver/layout/tiling/vertical'
-    # autoload :Notebook, 'ver/layout/notebook'
 
     attr_reader :strategy, :views, :stack, :options
 
@@ -79,6 +78,7 @@ module VER
       @stack[index - 1], @stack[index] = current, previous
 
       apply
+      previous.focus unless visible?(current)
     end
 
     # called on #3
@@ -94,6 +94,7 @@ module VER
       @stack[@stack.index(following)], @stack[index] = current, following
 
       apply
+      following.focus unless visible?(current)
     end
 
     def push_top(current)
@@ -104,6 +105,21 @@ module VER
     def push_bottom(view)
       @stack.push(@stack.delete(view))
       apply
+      @stack.first.focus unless visible?(view)
+    end
+
+    def cycle_next(current)
+      return unless index = @stack.index(current)
+      @stack.push(@stack.shift)
+      apply
+      @stack[index].focus
+    end
+
+    def cycle_prev(current)
+      return unless index = @stack.index(current)
+      @stack.unshift(@stack.pop)
+      apply
+      @stack[index].focus
     end
 
     def apply(options = {})
@@ -114,6 +130,11 @@ module VER
     def head_tail_hidden(options = {})
       @options.merge!(options)
       strategy.prepare(self, @options).first(3)
+    end
+
+    def visible?(view)
+      visible = head_tail_hidden.first(2).flatten
+      visible.include?(view)
     end
   end
 end
