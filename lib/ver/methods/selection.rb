@@ -203,7 +203,7 @@ module VER::Methods
         regex = /#{Regexp.escape(comment)}/
 
         Undo.record text do |record|
-          each_ine text do |y, fx, tx|
+          each_line text do |y, fx, tx|
             from, to = "#{y}.#{fx}", "#{y}.#{tx}"
             line = text.get(from, to)
 
@@ -344,7 +344,7 @@ module VER::Methods
 
         Open3.popen3(*cmd) do |si, sose, thread|
           queue = []
-          tet.tag_ranges(:sel).each do |from, to|
+          text.tag_ranges(:sel).each do |from, to|
             si.write(text.get(from, to))
             queue << from << to
           end
