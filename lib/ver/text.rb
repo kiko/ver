@@ -67,7 +67,6 @@ module VER
 
       on_disk = Digest::MD5.hexdigest(filename.read)
       in_memory = Digest::MD5.hexdigest(value)
-      p on_disk => in_memory
       on_disk == in_memory
     end
 
@@ -493,7 +492,7 @@ module VER
     end
 
     def setup_highlight_trailing_whitespace
-      tag_configure 'invalid.trailing-whitespace', background: '#f00'
+      tag_configure 'invalid.trailing-whitespace', background: '#400'
     end
 
     def setup_highlight_links
@@ -517,7 +516,7 @@ module VER
     end
 
     def tag_all_uris(given_options = {})
-      tag_all_matching('markup.underline.link', /https?:\/\/[^)\]}\s'"]+/, given_options)
+      tag_all_matching('markup.underline.link', /https?:\/\/[^<>)\]}\s'"]+/, given_options)
     end
 
     def tag_all_trailing_whitespace(given_options = {})
