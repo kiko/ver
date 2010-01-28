@@ -7,7 +7,7 @@ module VER::Methods
 
       def insert_at(text, motion, *count)
         Move.send(motion, text, *count)
-        text.mode = :insert
+        text.minor_mode(:control, :insert)
       end
 
       def insert_indented_newline_above(text)
@@ -44,7 +44,7 @@ module VER::Methods
       def cursor_vertical_center(text)
         insert = text.count('1.0', 'insert', :displaylines)
         last   = text.count('1.0', 'end', :displaylines)
-        shown  = text.count('@0,0', "@0,#{winfo_height}", :displaylines)
+        shown  = text.count('@0,0', "@0,#{text.winfo_height}", :displaylines)
 
         fraction = ((100.0 / last) * (insert - (shown / 2))) / 100
 
@@ -53,13 +53,13 @@ module VER::Methods
 
       def cursor_vertical_center_sol(text)
         cursor_vertical_center(text)
-        start_of_line(text)
+        Move.start_of_line(text)
       end
 
       def cursor_vertical_bottom(text)
         insert = text.count('1.0', 'insert', :displaylines) + 1
         last   = text.count('1.0', 'end', :displaylines)
-        shown  = text.count('@0,0', "@0,#{winfo_height}", :displaylines)
+        shown  = text.count('@0,0', "@0,#{text.winfo_height}", :displaylines)
 
         fraction = ((100.0 / last) * (insert - shown)) / 100
 
@@ -402,21 +402,6 @@ module VER::Methods
       rescue RuntimeError => exception
         return if exception.message =~ /Index "\d+\.\d+" before "insert lineend" in the text/
         Kernel.raise exception
-      end
-
-      def replace_char(text)
-        VER.message(
-          'Enter character to replace the character under the cursor with')
-
-        text.keymap.gets 1 do |char|
-          if char.size == 1
-            text.replace('insert', 'insert + 1 chars', char)
-            Move.prev_char(text)
-            VER.message "replaced #{char.size} chars"
-          else
-            VER.message 'replace aborted'
-          end
-        end
       end
 
       def indent_line(text, count = 1)

@@ -5,9 +5,14 @@ module VER
 
     MATCH_WORD_RIGHT =  /[^a-zA-Z0-9]+[a-zA-Z0-9'"{}\[\]\n-]/
     MATCH_WORD_LEFT =  /(^|\b)\S+(\b|$)/
+    MODE_STYLES = {
+      :insert  => {insertbackground: 'red', blockcursor: false},
+      /select/ => {insertbackground: 'yellow', blockcursor: true},
+      /replace/ => {insertbackground: 'orange', blockcursor: true},
+    }
 
     attr_accessor(:view, :status, :project_root, :project_repo, :encoding,
-                  :undoer, :pristine, :syntax)
+                  :undoer, :pristine, :syntax, :prefix_arg)
     attr_reader :filename, :options, :snippets, :preferences, :store_hash
 
     def initialize(view, options = {})
@@ -24,6 +29,35 @@ module VER
       end
 
       widget_setup(view)
+    end
+
+    # This is a noop, it simply provides a target with a sane name.
+    def update_prefix_arg(widget)
+      numbers = []
+
+      major_mode.history.reverse_each do |event|
+        break unless event[:sequence] =~ /^(\d+)$/
+        numbers << $1
+      end
+
+      if numbers.any? && numbers != ['0']
+        self.prefix_arg = numbers.reverse.join.to_i
+      else
+        self.prefix_arg = nil
+      end
+    end
+
+    # Same as [prefix_arg], but returns 1 if there is no argument.
+    # Useful for [Move] methods and the like.
+    # Please note that calling this method is destructive.
+    # It will reset the state of the prefix_arg in order to avoid persistent
+    # arguments.
+    # So use it only once while your action is running, and store the result in a
+    # variable if you need it more than once.
+    def prefix_count
+      count = prefix_arg || 1
+      update_prefix_arg(self)
+      count
     end
 
     def persisted?
@@ -48,8 +82,7 @@ module VER
 
     def inspect
       details = {
-        keymap: keymap,
-        mode: mode
+        mode: major_mode
       }.map{|key, value| "%s=%p" % [key, value ] }.join(' ')
       "#<VER::Text #{details}>"
     end
@@ -69,8 +102,7 @@ module VER
 
       @undoer = VER::Undo::Tree.new(self)
 
-      self.keymap = VER.keymap.use(widget: self)
-      @default_mode = keymap.mode
+      self.major_mode = :Fundamental
 
       apply_mode_style
       setup_tags
@@ -83,9 +115,9 @@ module VER
     end
 
     def event_setup
-      bind '<<EnterMode>>' do |event|
+      bind '<<EnterMinorMode>>' do |event|
         status_projection(status)
-        apply_mode_style(mode)
+        apply_mode_style(event.detail)
       end
 
       bind '<<Modified>>' do |event|
@@ -134,7 +166,7 @@ module VER
     end
 
     def noop(*args)
-      message "Noop %p in mode %p" % [args, keymap.mode]
+      # message "Noop %p in mode %p" % [args, keymap.mode]
     end
 
     def short_filename
@@ -219,6 +251,19 @@ module VER
 
         yield(match, pos, from)
       end
+    end
+
+    def up_down_line(count)
+      insert = index(:insert)
+
+      @udl_pos_orig = insert if @udl_pos_prev != insert
+
+      lines = count(@udl_pos_orig, insert, :displaylines)
+      target = index("#@udl_pos_orig + #{lines + count} displaylines")
+      @udl_pos_prev = target
+
+      @udl_pos_orig = target if target.x == @udl_pos_orig.x
+      target
     end
 
     def tag_exists?(given_path)
@@ -415,23 +460,19 @@ module VER
 
     private
 
-    def apply_mode_style(mode = @default_mode)
-      default_config = (@default_theme_config || {}).merge(blockcursor: true)
+    def apply_mode_style(given_mode = nil)
+      config = (@default_theme_config || {}).merge(blockcursor: false)
 
-      sub_config =
-        case mode
-        when @default_mode
-          default_config
-        when :insert, :snippet
-          {insertbackground: 'red', blockcursor: false}
-        when /select/
-          {insertbackground: 'yellow', blockcursor: true}
-        else
-          default_config
-          # Kernel.raise "No such mode style: %p" % [mode]
+      modes = given_mode ? [given_mode] : major_mode.minors
+
+      modes.each do |mode|
+        mode = MinorMode[mode]
+
+        MODE_STYLES.each do |pattern, style|
+          config.merge!(style) if pattern === mode.name
         end
+      end
 
-      config = default_config.merge(sub_config)
       configure(config)
       return unless status && color = config[:insertbackground]
 

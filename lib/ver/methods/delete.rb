@@ -1,9 +1,9 @@
 module VER::Methods
   module Delete
     class << self
-      def change_motion(text, motion, count = 1)
+      def change_motion(text, motion, count = text.prefix_count)
         delete_motion(text, motion, count)
-        text.mode = :insert
+        text.minor_mode(:control, :insert)
       end
 
       # Given a +motion+, this method will execute a virtual movement with the
@@ -14,7 +14,7 @@ module VER::Methods
       #
       # @see delete
       # @see VER::Move::virtual_movement
-      def delete_motion(text, motion, count = 1)
+      def delete_motion(text, motion, count = text.prefix_count)
         movement = Move.virtual(text, motion, count)
         delete(text, *movement)
       end
@@ -27,7 +27,7 @@ module VER::Methods
       #
       # @see kill
       # @see VER::Move#virtual_movement
-      def kill_motion(text, motion, count = 1)
+      def kill_motion(text, motion, count = text.prefix_count)
         movement = Move.virtual(text, motion, count)
         kill(text, *movement)
       end
@@ -35,10 +35,10 @@ module VER::Methods
       # [word_right_end] goes to the last character, that is, the insert mark is
       # between the second to last and last character.
       # This means that the range to delete is off by one, account for it here.
-      def change_word_right_end(text, count = 1)
+      def change_word_right_end(text, count = text.prefix_count)
         index = Move.index_at_word_right_end(text, count)
         delete(text, :insert, index + 1)
-        text.mode = :insert
+        text.minor_mode(:control, :insert)
       end
 
       # Delete current line and upto +count+ subsequent lines.
@@ -47,7 +47,7 @@ module VER::Methods
       #
       # @see delete
       # @see kill_line
-      def delete_line(text, count = 1)
+      def delete_line(text, count = text.prefix_count)
         count = count.abs - 1
         from = text.index('insert linestart')
         to = "#{from.y + count}.#{from.x} lineend + 1 char"
@@ -60,7 +60,7 @@ module VER::Methods
       #
       # @see kill
       # @see delete_line
-      def kill_line(text, count = 1)
+      def kill_line(text, count = text.prefix_count)
         count = count.abs - 1
         from = text.index('insert linestart')
         to = "#{from.y + count.to_i}.#{from.x} lineend + 1 char"
@@ -73,12 +73,12 @@ module VER::Methods
       # @param [#to_i] count Number of lines to kill
       #
       # @see kill_line
-      def change_line(text, count = 1)
+      def change_line(text, count = text.prefix_count)
         count = count.abs - 1
         from = text.index('insert linestart')
         to = "#{from.y + count}.#{from.x} lineend"
         kill(text, from, text.index(to))
-        text.mode = :insert
+        text.minor_mode(:control, :insert)
       end
 
       # Tag and delete all trailing whitespace in the current buffer.

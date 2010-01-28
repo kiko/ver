@@ -8,7 +8,6 @@ autoload :Tempfile,  'tempfile'
 
 # eager stdlib
 require 'digest/sha1'
-# require 'json'
 require 'pp'
 require 'securerandom'
 require 'set'
@@ -16,30 +15,36 @@ require 'pathname'
 
 autoload :SizedArray, 'ver/vendor/sized_array'
 
+# This is the doc for VER
 module VER
+  autoload :Action,              'ver/action'
+  autoload :Bookmarks,           'ver/methods/bookmark'
   autoload :Entry,               'ver/entry'
+  autoload :ExceptionView,       'ver/exception_view'
   autoload :Executor,            'ver/executor'
-  autoload :Help,                'ver/help'
   autoload :Font,                'ver/font'
+  autoload :Help,                'ver/help'
   autoload :HoverCompletion,     'ver/hover_completion'
   autoload :Keymap,              'ver/keymap'
-  autoload :TilingLayout,        'ver/layout/tiling'
-  autoload :NotebookLayout,      'ver/layout/notebook'
+  autoload :Keymapped,           'ver/keymap/keymapped'
+  autoload :Levenshtein,         'ver/vendor/levenshtein'
   autoload :Methods,             'ver/methods'
-  autoload :Mode,                'ver/mode'
+  autoload :NotebookLayout,      'ver/layout/notebook'
   autoload :Status,              'ver/status'
   autoload :Syntax,              'ver/syntax'
   autoload :Text,                'ver/text'
   autoload :Textpow,             'ver/vendor/textpow'
-  autoload :Levenshtein,         'ver/vendor/levenshtein'
   autoload :Theme,               'ver/theme'
-  autoload :View,                'ver/view'
-  autoload :ExceptionView,       'ver/exception_view'
-  autoload :Bookmarks,           'ver/methods/bookmark'
+  autoload :TilingLayout,        'ver/layout/tiling'
   autoload :Undo,                'ver/undo'
-  autoload :Keymapped,           'ver/keymap/keymapped'
+  autoload :View,                'ver/view'
+  autoload :WidgetEvent,         'ver/widget_event'
+  autoload :WidgetMajorMode,     'ver/widget_major_mode'
 
+  require 'ver/major_mode'
+  require 'ver/minor_mode'
   require 'ver/options'
+
   @options = Options.new(:ver)
 
   class << self
@@ -208,6 +213,7 @@ module VER
   def load_plugins
     @load_plugins.each do |plugin|
       load_plugin(plugin)
+      Tk::Event.generate(root, '<<PluginLoaded>>', data: plugin.to_s)
     end
   end
 
@@ -247,7 +253,7 @@ module VER
 
     setup_layout
 
-    @keymap = Keymap.load(options.keymap)
+    load("keymap/#{options.keymap}.rb")
   end
 
   def setup_layout
