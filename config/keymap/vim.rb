@@ -49,7 +49,6 @@ module VER
   minor_mode :views do
     inherits :basic
     handler Methods::Views
-    # handler Methods::Views
 
     map :one,           %w[1]
     map :two,           %w[2]
@@ -71,6 +70,7 @@ module VER
 
     map :master_shrink, %w[h]
     map :master_grow,   %w[l]
+    map :master_equal,  %w[equal]
 
     map :peer,          %w[p]
   end
@@ -210,6 +210,7 @@ module VER
     map [:insert_at, :next_char],           %w[a]
 
     map :indent_line,                       %w[greater]
+    map :unindent_line,                     %w[less]
 
     map :join_lines,                        %w[J]
 
@@ -225,12 +226,11 @@ module VER
     map :theme_switch,                      %w[Control-t]
     map :toggle_case,                       %w[asciitilde]
 
-    map :unindent_line,                     %w[less]
     map :wrap_line,                         %w[g w]
 
     handler Methods::Insert
-    map :indented_newline_above,     %w[O]
-    map :indented_newline_below,     %w[o]
+    map :newline_above,     %w[O]
+    map :newline_below,     %w[o]
   end
 
   minor_mode :readline do
@@ -282,9 +282,9 @@ module VER
 
 
     handler Methods::Insert
-    map :indented_newline,  %w[Return]
-    map :selection,         %w[Shift-Insert]
-    map :tab,               %w[Control-v Tab], %w[Control-i]
+    map :newline,    %w[Return]
+    map :selection,  %w[Shift-Insert]
+    map :tab,        %w[Control-v Tab], %w[Control-i]
     missing :string
   end
 
@@ -297,6 +297,8 @@ module VER
   end
 
   minor_mode :replace_char do
+    become :control, %w[Escape], %w[Control-c]
+
     handler Methods::Insert
     map [:replace_char, "\n"], %w[Return]
     missing :replace_char
@@ -312,7 +314,6 @@ module VER
     map :kill,            %w[d], %w[D], %w[x], %w[BackSpace], %w[Delete]
     map :pipe,            %w[exclam]
     map :lower_case,      %w[u]
-    map :replace_char,    %w[r]
     map :replace_string,  %w[c]
     map :toggle_case,     %w[asciitilde]
     map :upper_case,      %w[U]
@@ -330,6 +331,7 @@ module VER
     become :control,      %w[Escape], %w[Control-c]
     become :select_line,  %w[V]
     become :select_block, %w[Control-v]
+    become :select_replace_char, %w[r]
 
     handler Methods::Selection
     enter :enter
@@ -342,6 +344,7 @@ module VER
     become :control,      %w[Escape], %w[Control-c]
     become :select_char,  %w[v]
     become :select_block, %w[Control-v]
+    become :select_replace_char, %w[r]
 
     handler Methods::Selection
     enter :enter
@@ -354,10 +357,19 @@ module VER
     become :control,     %w[Escape], %w[Control-c]
     become :select_char, %w[v]
     become :select_line, %w[V]
+    become :select_replace_char, %w[r]
 
     handler Methods::Selection
     enter :enter
     leave :leave
+  end
+
+  minor_mode :select_replace_char do
+    become :control, %w[Escape], %w[Control-c]
+
+    handler Methods::Selection
+    map [:replace_char, "\n"], %w[Return]
+    missing :replace_char
   end
 
   minor_mode :status_query do
@@ -440,11 +452,26 @@ module VER
   end
 
   minor_mode :executor_entry do
-    map :cancel,          %w[Escape], %w[Control-c]
-    map :completion,      %w[Tab]
-    map :line_down,       %w[Down], %w[Control-j], %w[Control-n]
-    map :line_up,         %w[Up], %w[Control-k], %w[Control-p]
-    map :pick_selection,  %w[Return]
+    map :cancel,            %w[Escape], %w[Control-c]
+    map :completion,        %w[Tab]
+    map :end_of_line,       %w[Control-e], %w[End]
+    map :insert_selection,  %w[Shift-Insert]
+    map :insert_tab,        %w[Control-i]
+    map :kill_next_char,    %w[Control-d], %w[Delete]
+    map :kill_prev_char,    %w[BackSpace]
+    map :kill_prev_word,    %w[Control-w]
+    map :kill_next_word,    %w[Alt-d]
+    map :kill_end_of_line,  %w[Control-k]
+    map :line_down,         %w[Down], %w[Control-j], %w[Control-n]
+    map :line_up,           %w[Up], %w[Control-k], %w[Control-p]
+    map :next_char,         %w[Control-f], %w[Right]
+    map :next_word,         %w[Shift-Right], %w[Alt-f]
+    map :pick_selection,    %w[Return]
+    map :prev_char,         %w[Control-b], %w[Left]
+    map :prev_word,         %w[Shift-Left], %w[Alt-b]
+    map :quit,              %w[Control-q]
+    map :start_of_line,     %w[Control-a], %w[Home]
+    map :transpose_chars,   %w[Control-t]
 
     missing :insert_string
   end

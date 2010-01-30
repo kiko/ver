@@ -76,11 +76,11 @@ module VER
         end
 
         def next(text)
-          open(bookmarks.next_from(bookmark_value(text)))
+          open(text, bookmarks.next_from(bookmark_value(text)))
         end
 
         def prev(text)
-          open(bookmarks.prev_from(bookmark_value(text)))
+          open(text, bookmarks.prev_from(bookmark_value(text)))
         end
 
         private
@@ -90,20 +90,21 @@ module VER
         end
 
         def bookmark_value(text)
-          [text.filename, text.index(:insert)]
+          [text.filename, *text.index(:insert).split]
         end
 
         def open(text, bookmark, use_x = true)
           return unless bookmark.respond_to?(:file) && bookmark.respond_to?(:index)
 
           Views.find_or_create(text, bookmark.file) do |view|
-            y, x = use_x ? bookmark.index.split : [bookmark.index.y, 0]
-            view.text.mark_set(:insert, "#{y}.#{x}")
+            y, x = use_x ? bookmark.index : [bookmark.line, 0]
+            Methods::Move.go_line(text, y)
+            Methods::Move.go_column(text, x)
           end
         end
-      end
-    end
-  end
+      end # << self
+    end # Bookmark
+  end # Methods
 
   class Bookmarks
     include Enumerable
@@ -178,16 +179,24 @@ module VER
       @bm.find{|bm| needle == bm }
     end
 
-    class Bookmark < Struct.new(:name, :file, :index)
+    class Bookmark < Struct.new(:name, :file, :line, :column)
       include Comparable
 
       def <=>(other)
         [file, index] <=> [other.file, other.index]
       end
 
-      def to_a
-        [name, file, index.y, index.x]
+      def index
+        [line, column]
       end
-    end
-  end
-end
+
+      def index=(index)
+        self.line, self.column = *index
+      end
+
+      def to_a
+        [name, file, y, x]
+      end
+    end # Bookmark
+  end # Bookmarks
+end # VER
