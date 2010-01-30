@@ -80,10 +80,12 @@ module VER
 
     handler Methods::Views
     map :change,     ['Control-w', :views]
-    map :focus_next, %w[Control-Tab]
-    map :focus_prev, %w[Control-Shift-Tab], %w[Control-ISO_Left_Tab]
+    map :focus_next, %w[Control-Tab], %w[Control-j]
+    map :focus_prev, %w[Control-Shift-Tab], %w[Control-ISO_Left_Tab], %w[Control-k]
     map :cycle_next, %w[Alt-Tab]
     map :cycle_prev, %w[Alt-Shift-Tab], %w[Alt-ISO_Left_Tab]
+    map :master_shrink, %w[Control-h]
+    map :master_grow,   %w[Control-l]
   end
 
   minor_mode :move do
@@ -167,6 +169,7 @@ module VER
     map [:kill_motion, :prev_char],  %w[X]
     map [:kill_motion, :end_of_line],    %w[D]
     map [:kill_motion, :next_char],   %w[x]
+    map :delete_trailing_whitespace,        %w[d t]
   end
 
   minor_mode :clipboard do

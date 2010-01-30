@@ -76,3 +76,4 @@ VER.options.dsl do
 end
 
 VER.plugin :autosave
+VER.plugin :haml

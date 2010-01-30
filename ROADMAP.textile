@@ -74,6 +74,7 @@ it's very OSX specific and will conflict with e.g. emacs or vim keymaps.
 Maybe we need a separate TM keymap and define a common prefix to the keychains
 in other keymaps.
 
+<<<<<<< Updated upstream
 h2. Update keymaps
 
 All the keymaps (apart from vim) need to be fixed to match current major/minor
@@ -156,3 +157,13 @@ Another safeguard is to check the file mtime when opening, and see whether it's
 still the same before writing the file to disk again.
 This allows for a small race-condition, but it's still vastly better than
 no protection at all.
+
+h2. One interface to search everything
+Currently each Ex finders are dependent. A user needs to think first what he want
+to what kind of stuff VER to look for, such as buffers, filesystem, methods.
+Instead, let users input a query keyword then return the search results from
+buffers, filesystem(locale), histories, paste buffer, help documents and all.
+
+h2. Minor modes that might be useful
+
+  * Highlight matched parenthesis and def...end

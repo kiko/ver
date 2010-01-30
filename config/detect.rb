@@ -149,7 +149,8 @@ module VER::Syntax::Detector
   exts "Remind", ["defs.rem", "REM*.txt", ".reminders"]
   head "Remind", /^REM*/
   exts "Rez", ["r"]
-  exts "Ruby Haml", ["haml", "sass"]
+  exts "Ruby Haml", ["haml"]#, "sass"]
+  exts "SASS", ["sass"]
   exts "Ruby on Rails", ["rxml", "builder"]
   exts "Ruby", ["rb", "rbx", "rjs", "Rakefile", "rake", "cgi", "fcgi", "gemspec", "irbrc", "capfile"]
   head "Ruby", /^#!\/.*\bruby\b/
