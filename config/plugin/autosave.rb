@@ -11,8 +11,8 @@
 
 VER.startup_hook do
   VER.when_inactive_for 500 do
-    VER.layout.views.each do |view|
-      text = view.text
+    VER.buffers.each do |name, buffer|
+      text = buffer.text
 
       next if text.pristine? || text.persisted?
 

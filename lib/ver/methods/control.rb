@@ -81,7 +81,7 @@ module VER::Methods
       # Toggle case of the character under the cursor up to +count+ characters
       # forward (+count+ is inclusive the first character).
       # This only works for alphabetic ASCII characters, no other encodings.
-      def toggle_case(text, count = 1)
+      def toggle_case(text, count = text.prefix_count)
         from, to = 'insert', "insert + #{count} chars"
         chunk = text.get(from, to)
         chunk.tr!('a-zA-Z', 'A-Za-z')
@@ -99,10 +99,10 @@ module VER::Methods
         :search,
       ]
 
-      def repeat_command(text, count = 1)
-        bundle = []
-        text.keymap.execute_history.reverse_each do |mode, widget, action, arg|
-          if bundle.empty?
+      def repeat_command(text, count = text.prefix_count)
+        actions = []
+        text.major_mode.action_history.reverse_each do |event, mode, action|
+          if actions.empty?
             next if REPEAT_BREAK_CMD.include?(action.method)
             next if REPEAT_BREAK_MODE.include?(mode.name)
           else
@@ -110,16 +110,14 @@ module VER::Methods
             break if REPEAT_BREAK_MODE.include?(mode.name)
           end
 
-          bundle << [mode, widget, action, arg]
+          actions << [action, event]
         end
 
-        bundle.reverse!
+        actions.reverse!
 
-        count.times do
-          bundle.each do |mode, widget, action, arg|
-            # p [cmd, arg]
-            mode.execute_without_history(widget, action, arg)
-          end
+        actions.each do |action, event|
+          event.prefix_arg = count
+          action.call(event)
         end
       end
 
@@ -151,7 +149,7 @@ module VER::Methods
       end
 
       def prepare_exec_F
-        p F: (ENV['F'] = layout.views.map{|v| v.text.filename }.join(' '))
+        p F: (ENV['F'] = VER.buffers.map{|key, buffer| buffer.filename }.join(' '))
       end
 
       def prepare_exec_i
@@ -247,7 +245,7 @@ module VER::Methods
           p command
           system(command)
           target.open('w+'){|io| io.write(`#{command}`) }
-          view.find_or_create(target)
+          VER.find_or_create_buffer(target)
         else
           status_ask 'Command: ' do |command|
             exec_into_new(command)
@@ -312,7 +310,7 @@ module VER::Methods
       def status_ex
         completion = method(:status_ex_filter)
 
-        View::List::Ex.new self, completion do |command, propose|
+        Buffer::List::Ex.new self, completion do |command, propose|
           begin
             result = propose ? send(command, propose) : eval(command)
             status.message "%s # => %p" % [command, result]
@@ -347,13 +345,13 @@ module VER::Methods
       def theme_switch
         return unless @syntax
 
-        View::List::Theme.new(self){|name| load_theme(name) }
+        Buffer::List::Theme.new(self){|name| load_theme(name) }
       end
 
       def syntax_switch
         return unless @syntax
 
-        View::List::Syntax.new(self){|name| load_syntax(name) }
+        Buffer::List::Syntax.new(self){|name| load_syntax(name) }
       end
 
       def smart_evaluate(text)
@@ -404,12 +402,12 @@ module VER::Methods
         Kernel.raise exception
       end
 
-      def indent_line(text, count = 1)
+      def indent_line(text, count = text.prefix_count)
         indent = (' ' * text.options[:shiftwidth] * count)
         text.insert('insert linestart', indent)
       end
 
-      def unindent_line(text, count = 1)
+      def unindent_line(text, count = text.prefix_count)
         indent = ' ' * text.options[:shiftwidth]
         replace_from = 'insert linestart'
         replace_to = "insert linestart + #{indent.size} chars"

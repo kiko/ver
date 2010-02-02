@@ -38,7 +38,7 @@ module VER
   autoload :TilingLayout,        'ver/layout/tiling'
   autoload :PanedLayout,         'ver/layout/paned'
   autoload :Undo,                'ver/undo'
-  autoload :View,                'ver/view'
+  autoload :Buffer,              'ver/buffer'
   autoload :WidgetEvent,         'ver/widget_event'
   autoload :WidgetMajorMode,     'ver/widget_major_mode'
   autoload :KEYSYMS,             'ver/keysyms'
@@ -51,8 +51,8 @@ module VER
   @options = Options.new(:ver)
 
   class << self
-    attr_reader(:root, :layout, :status, :paths, :options, :bookmarks,
-                :ctag_stack, :keymap, :style_name_register, :style_name_pool)
+    attr_reader(:ctag_stack, :keymap, :style_name_pools, :style_name_register,
+                :bookmarks, :buffers, :layout, :options, :paths, :root, :status)
     attr_accessor :layout_class
   end
 
@@ -152,7 +152,8 @@ module VER
     @bookmarks = Bookmarks.new
     @ctag_stack = []
     @style_name_register = []
-    @style_name_pool = []
+    @style_name_pools = {}
+    @buffers = {}
 
     load 'rc'
     @options.merge!(given_options)
@@ -160,7 +161,6 @@ module VER
 
   def run_core
     sanitize_options
-    # dump_options
     setup_widgets
     open_argv || open_welcome
     open_session
@@ -347,28 +347,26 @@ module VER
 
   def open_argv
     argv = ARGV.dup
-    any = false
+    openend_any = false
 
     while arg = argv.shift
-      layout.create_view do |view|
-        if argv.first =~ /\+\d+/
-          line = argv.shift.to_i
-          view.open_path(arg, line)
-        else
-          view.open_path(arg)
-        end
-
-        any = true
+      if argv.first =~ /\+\d+/
+        line = argv.shift.to_i
+        find_or_create_buffer(arg, line)
+      else
+        find_or_create_buffer(arg)
       end
+
+      opened_any = true
     end
 
-    any
+    opened_any
   end
 
   def open_welcome
-    layout.create_view do |view|
-      welcome = find_in_loadpath('welcome')
-      view.open_path(welcome)
+    if welcome = find_in_loadpath('welcome')
+      find_or_create_buffer(welcome)
+      true
     end
   end
 
@@ -378,7 +376,6 @@ module VER
     return unless file = find_in_loadpath(basename)
 
     session = eval(File.read(file))
-    some_view = layout.views.first
 
     session[:bookmarks].each do |raw_bm|
       bm = Bookmarks::Bookmark.new
@@ -389,7 +386,7 @@ module VER
     end
 
     session[:buffers].each do |buffer|
-      some_view.find_or_create(buffer[:filename], *buffer[:insert])
+      find_or_create_buffer(buffer[:filename], *buffer[:insert])
     end
   end
 
@@ -399,10 +396,10 @@ module VER
     session_path = loadpath.first/basename
 
     session = {buffers: [], bookmarks: []}
-    layout.views.each do |view|
+    buffers.each do |buffer|
       session[:buffers] << {
-        filename: view.filename.to_s,
-        insert: view.text.index(:insert).split,
+        filename: buffer.filename.to_s,
+        insert: buffer.text.index(:insert).split,
       }
     end
 
@@ -421,6 +418,10 @@ module VER
     end
   end
 
+  def find_or_create_buffer(file, line = nil, column = nil)
+    Buffer.find_or_create(file, line, column)
+  end
+
   def emergency_bindings
     Tk::Bind.bind(:all, options.emergency_exit){ exit }
   end
@@ -434,19 +435,26 @@ module VER
   end
 
   def obtain_style_name(widget_name, widget_class)
-    unless style_name = style_name_pool.shift
+    suffix = "#{widget_name}.#{widget_class}"
+    pool = style_name_pools[suffix] ||= []
+    register = style_name_register
+
+    unless name = pool.shift
       begin
         id = SecureRandom.hex
-        style_name = "#{id}.#{widget_name}.#{widget_class}"
-      end while style_name_register.include?(style_name)
-      style_name_register << style_name
+        name = "#{id}.#{suffix}"
+      end while register.include?(name)
+
+      register << name
     end
 
-    style_name
+    return name
   end
 
   def return_style_name(style_name)
-    style_name_pool << style_name
+    id, widget_name, widget_class = style_name.split('.')
+    suffix = "#{widget_name}.#{widget_class}"
+    style_name_pools[suffix] << style_name
   end
 
   def dump_options
@@ -484,19 +492,7 @@ module VER
   end
 
   def exception_view(exception)
-    unless @exception_view
-      @exception_view ||= ExceptionView.new(@root)
-
-      @exception_view.bind '<<TreeviewOpen>>' do
-        @exception_view.on_treeview_open
-      end
-
-      @exception_view.bind '<Escape>' do
-        @exception_view.pack_forget
-        @layout.views.first.focus
-      end
-    end
-
+    @exception_view ||= ExceptionView.new(root)
     @exception_view.show(exception)
   end
 end

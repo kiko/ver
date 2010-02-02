@@ -74,7 +74,6 @@ it's very OSX specific and will conflict with e.g. emacs or vim keymaps.
 Maybe we need a separate TM keymap and define a common prefix to the keychains
 in other keymaps.
 
-<<<<<<< Updated upstream
 h2. Update keymaps
 
 All the keymaps (apart from vim) need to be fixed to match current major/minor
@@ -167,3 +166,33 @@ buffers, filesystem(locale), histories, paste buffer, help documents and all.
 h2. Minor modes that might be useful
 
   * Highlight matched parenthesis and def...end
+
+h2. A major mode per bundle
+
+Right now, a major mode is a compilation of minor modes plus a keymap of its own.
+What we would like is a major mode that takes responsibility of the
+syntax/snippets/preferences (bundle) being used.
+The hard part about this is that we would have to know which major mode name is
+associated with a bundle.
+We face a bit of a bootstrapping problem, for emacs this is no issue, as lots
+of code monkeys wrote lots of major modes for their favorite languages.
+We don't have that benefit, all we have is a bunch of bundles from TM that we
+can scavange.
+We could create our own kind of Bundle format.
+
+config/bundles/Ruby
+config/bundles/Ruby/keymaps/vim.rb
+config/bundles/Ruby/syntax.rb
+config/bundles/Ruby/preferences.rb
+config/bundles/Ruby/snippets.rb
+
+this way, to share a bundle you can simply tar up the folder and put it somewhere.
+This also makes it easier to keep bundles outside of the VER folder structure,
+in another git repo, for example, and just point VER to that location.
+
+Text => .syntax
+Text => .preferences
+Text => .snippets
+
+WidgetMajorMode(widget, major) => MajorMode(name) => Ruby(Syntax, preferences, snippets)
+

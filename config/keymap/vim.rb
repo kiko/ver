@@ -46,9 +46,9 @@ module VER
     map :open_window_switch,  %w[Alt-B], %w[Control-m B]
   end
 
-  minor_mode :views do
+  minor_mode :layout do
     inherits :basic
-    handler Methods::Views
+    handler Methods::Layout
 
     map :one,           %w[1]
     map :two,           %w[2]
@@ -75,11 +75,11 @@ module VER
     map :peer,          %w[p]
   end
 
-  minor_mode :views_control do
-    become :views, %w[Control-w r]
+  minor_mode :layout_control do
+    become :layout, %w[Control-w r]
 
-    handler Methods::Views
-    map :change,     ['Control-w', :views]
+    handler Methods::Layout
+    map :change,     ['Control-w', :layout]
     map :focus_next, %w[Control-Tab], %w[Control-j]
     map :focus_prev, %w[Control-Shift-Tab], %w[Control-ISO_Left_Tab], %w[Control-k]
     map :cycle_next, %w[Alt-Tab]
@@ -189,7 +189,7 @@ module VER
   end
 
   minor_mode :control do
-    inherits :basic, :move, :delete, :undo, :views_control, :search, :ctags,
+    inherits :basic, :move, :delete, :undo, :layout_control, :search, :ctags,
              :bookmark, :clipboard
 
     become :select_block,   %w[Control-v]
@@ -257,7 +257,7 @@ module VER
   end
 
   minor_mode :insert do
-    inherits :basic, :views_control, :complete
+    inherits :basic, :layout_control, :complete
     become :control, %w[Escape], %w[Control-c]
 
     handler Methods::AutoFill
@@ -384,7 +384,7 @@ module VER
     missing :insert_string
   end
 
-  minor_mode :list_view_entry do
+  minor_mode :list_buffer_entry do
     inherits :basic, :readline
 
     map :cancel,          %w[Escape], %w[Control-c]
@@ -396,7 +396,7 @@ module VER
     missing :insert_string
   end
 
-  minor_mode :list_view_list do
+  minor_mode :list_buffer_list do
     inherits :basic
 
     map :cancel,          %w[Escape], %w[Control-c]
