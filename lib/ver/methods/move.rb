@@ -18,28 +18,25 @@ module VER::Methods
         opening = text.get(:insert)
 
         if closing = GO_MATCHING_RIGHT[opening]
-          search = text.method(:search_all)
-          level = 1
           start = 'insert + 1 chars'
+          search = text.method(:search_all)
         elsif closing = GO_MATCHING_LEFT[opening]
-          search = text.method(:rsearch_all)
-          level = 1
           start = 'insert'
-        else
-          return
+          search = text.method(:rsearch_all)
         end
 
+        balance = 1
         needle = Regexp.union(opening, closing)
-
-        search.call(needle, start) do |match, pos, from|
-          if match == opening
-            level += 1
-          elsif match == closing
-            level -= 1
+        search.call needle, start do |match, from, to|
+          case match
+          when opening
+            balance += 1
+          when closing
+            balance -= 1
           end
 
-          if level < 1
-            text.mark_set(:insert, pos)
+          if balance == 0
+            text.mark_set(:insert, from)
             return
           end
         end
@@ -107,11 +104,11 @@ module VER::Methods
       end
 
       # Basically like [go_line] without arguments, but much nicer name.
-      def start_of_file(text)
+      def start_of_text(text)
         text.mark_set(:insert, "1.0")
       end
 
-      def end_of_file(text, count = text.prefix_arg)
+      def end_of_text(text, count = text.prefix_arg)
         if count
           text.mark_set(:insert, "#{count}.0")
         else
