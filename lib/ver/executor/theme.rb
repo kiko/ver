@@ -6,7 +6,6 @@ module VER
         @themes = VER::Theme.list.map{|fullpath|
           File.basename(fullpath, File.extname(fullpath))
         }
-        tree.configure(show: [], columns: %w[theme], displaycolumns: %w[theme])
       end
 
       def choices(name)
@@ -15,6 +14,7 @@ module VER
 
       def action(name)
         caller.load_theme(name)
+        callback.destroy
       end
     end
   end

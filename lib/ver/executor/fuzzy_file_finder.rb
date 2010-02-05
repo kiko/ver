@@ -68,9 +68,9 @@ module VER
         values.map do |value|
           score = value.last
           tag =
-            if score < 0.3; :icy
-            elsif score < 0.6; :cold
-            elsif score < 0.9; :warm
+            if score < 0.25; :icy
+            elsif score < 0.5; :cold
+            elsif score < 0.75; :warm
             else; :hot
             end
 
@@ -98,7 +98,7 @@ module VER
       def action(path)
         throw(:invalid) unless File.file?(path)
         VER.find_or_create_buffer(path)
-        callback.destroy
+        callback.destroy(false)
       end
     end
   end
