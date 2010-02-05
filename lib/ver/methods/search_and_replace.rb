@@ -22,6 +22,10 @@ module VER
           old_pattern = old_pattern.inspect[1..-1]
         end
 
+        text.status.bind('<<Modified>>') do
+          Search::incremental(text, text.status.value)
+        end
+
         text.status_ask 'Replace pattern: /', value: old_pattern do |pattern|
           pattern << '/i' unless pattern =~ /\/[ixm]*$/
 
@@ -37,6 +41,8 @@ module VER
             old_replacement = text.store(self, :replacement)
             question = "Replace %p with: " % [regexp]
             text.status_ask question, value: old_replacement do |replacement|
+              text.status.bind('<<Modified>>'){ }
+              Search::incremental(text, replacement)
               text.store(self, :replacement, replacement)
               text.minor_mode(:control, :search_and_replace)
             end
