@@ -7,7 +7,7 @@ module VER
       end
 
       def copy
-        Methods::Clipboard.copy(buffer, get)
+        buffer.with_register{|reg| reg.value = get }
       end
 
       def count(*options)
@@ -20,6 +20,10 @@ module VER
 
       def dump(*options)
         buffer.dump(*options, *self)
+      end
+
+      def encode_rot13!(record = buffer)
+        record.replace(*self, get.tr('A-Ma-mN-Zn-z', 'N-Zn-zA-Ma-m'))
       end
 
       def first=(index)
@@ -43,6 +47,11 @@ module VER
         self[:last] = index.is_a?(Index) ? index : buffer.index(index)
       end
 
+      def lower_case!(record = buffer)
+        record.replace(*self, get.downcase)
+      end
+      alias downcase! lower_case!
+
       def replace(*args)
         buffer.replace(first, last, *args)
       end
@@ -50,6 +59,16 @@ module VER
       def to_a
         [first, last]
       end
+
+      def toggle_case!(record = buffer)
+        record.replace(*self, get.tr('a-zA-Z', 'A-Za-z'))
+      end
+      # alias needed?
+
+      def upper_case!(record = buffer)
+        record.replace(*self, get.upcase)
+      end
+      alias upcase! upper_case!
     end
   end
 end

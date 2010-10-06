@@ -36,14 +36,24 @@ module VER
         return  0 if compare('==', other)
       end
 
-      def change_line
+      # Kill contents of the line at position, switch from control to
+      # insert mode.
+      # Always leaves an empty line
+      def change_line(count = buffer.prefix_count)
         kill_line
         buffer.minor_mode(:control, :insert)
       end
 
-      def copy_line
-        content = buffer.get("#{self} linestart", "#{self} lineend + 1 chars")
-        Methods::Clipboard.copy(buffer, content)
+      def copy_line(count = buffer.prefix_count)
+        from = "#{self} linestart"
+
+        to =
+          case count
+          when 0, 1; "#{self} lineend + 1 chars"
+          else     ; "#{self} + #{count - 1} lines lineend + 1 chars"
+          end
+
+        buffer.range(buffer.index(from), buffer.index(to)).copy
       end
 
       # Delete this and any other given +indices+ from the buffer.
@@ -51,8 +61,8 @@ module VER
         buffer.delete(self, *indices)
       end
 
-      def delete_line
-        buffer.delete("#{self} linestar", "#{self} lineend + 1 chars")
+      def delete_line(count = buffer.prefix_count)
+        buffer.delete("#{self} linestart", "#{self} + #{count - 1} lines lineend + 1 chars")
       end
 
       def dlineinfo
@@ -83,6 +93,90 @@ module VER
         end
       end
 
+      def increase_number(count = buffer.prefix_count)
+        return unless result = formatted_number(count)
+        head, tail, number = *result
+        buffer.replace(
+          "#{self} - #{head.size} chars",
+          "#{self} + #{tail.size} chars",
+          number
+        )
+      end
+
+      def decrease_number(count = buffer.prefix_count)
+        return unless result = formatted_number(-count)
+        head, tail, number = *result
+        buffer.replace(
+          "#{self} - #{head.size} chars",
+          "#{self} + #{tail.size} chars",
+          number
+        )
+      end
+
+      def formatted_hex(number)
+        if number > 0
+          '%#x' % number
+        elsif number == 0
+          '0x0'
+        else
+          '-0x%x' % number.abs
+        end
+      end
+
+      def formatted_binary(number)
+        if number > 0
+          '%#b' % number
+        elsif number == 0
+          '0b0'
+        else
+          '-0b%b' % number.abs
+        end
+      end
+
+      def formatted_exponential(number, precicion)
+        "%-.#{precicion}e" % number
+      end
+
+      def formatted_float(number, precicion)
+        "%-.#{precicion}f" % number
+      end
+
+      def formatted_octal(number)
+        if number > 0
+          '%#o' % number
+        elsif number == 0
+          '00'
+        else
+          '-0%o' % number.abs
+        end
+      end
+
+      def formatted_number(count)
+        head = buffer.get("#{self} linestart", self)[/\S*$/]
+        tail = buffer.get(self, "#{self} lineend")[/^\S*/]
+
+        number =
+          case chunk = head + tail
+          when /^[+-]?0x\h+$/
+            formatted_hex(Integer(chunk) + count)
+          when /^[+-]?0b[01]+$/
+            formatted_binary(Integer(chunk) + count)
+          when /^[+-]?(\d+\.\d+|\d+)e[+-]?\d+$/
+            precicion = $1[/\.(\d+)/, 1].to_s.size
+            formatted_exponential(Float(chunk) + count, precicion)
+          when /^[+-]?\d+\.(\d+)/
+            formatted_float(Float(chunk) + count, $1.size)
+          when /^[+-]?([1-9]\d*|0)$/
+            "%-d" % [Integer(chunk) + count]
+          when /^[+-]?0\d+$/
+            formatted_octal(Integer(chunk) + count)
+          else
+            return
+          end
+
+        return head, tail, number
+      end
+
       def inspect
         index.inspect
       end
@@ -91,9 +185,9 @@ module VER
         buffer.insert(self, *args)
       end
 
-      def kill_line
-        copy_line
-        delete_line
+      def kill_line(count = buffer.prefix_count)
+        copy_line(count)
+        delete_line(count)
       end
 
       def see
@@ -118,6 +212,10 @@ module VER
 
       def to_a
         index.to_a
+      end
+
+      def toggle_case!(count = buffer.prefix_count)
+        buffer.range(self, self + "#{count} displaychars").toggle_case!
       end
 
       def +(arg)

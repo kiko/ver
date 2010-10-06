@@ -11,6 +11,7 @@ module VER::Syntax::Detector
   exts "Apache", ["conf", "htaccess"]
   exts "AppleScript", ["applescript", "script editor"]
   head "AppleScript", /^#!.*(osascript)/
+  exts "AsciiDoc", ["txt", "asciidoc"]
   exts "ASP", ["asa"]
   exts "ASP vb.NET", ["vb"]
   exts "BibTeX", ["bib"]
@@ -30,10 +31,12 @@ module VER::Syntax::Detector
   head "C++", /-\*- C\+\+ -\*-/
   head "C++ Qt", /-\*- C\+\+ -\*-/
   exts "CMake Listfile", ["CMakeLists.txt", "cmake"]
+  exts "CoffeeScript", ["coffee", "Cakefile"]
   exts "ColdFusion", ["cfm", "cfml", "cfc"]
   exts "Context Free", ["cfdg", "context free"]
   exts "CSS", ["css", "css.erb"]
   exts "CSV", ["csv"]
+  exts "Cucumber Steps", ["steps.rb"]
   exts "D", ["d", "di"]
   head "D", /^#!.*\bg?dmd\b./
   exts "Diff", ["diff", "patch"]
@@ -57,6 +60,10 @@ module VER::Syntax::Detector
   exts "Fortran - Punchcard", ["f", "F", "f77", "F77", "for", "FOR", "fpp", "FPP"]
   exts "FXScript", ["fxscript"]
   exts "Gettext", ["po", "potx"]
+  exts "Gherkin", ["feature"]
+  head "Gherkin", /기능|機能|功能|フィーチャ|خاصية|תכונה|Функціонал|Функционалност|Функционал|Особина|Могућност|Özellik|Właściwość|Tính năng|Savybė|Požiadavka|Požadavek|Osobina|Ominaisuus|Omadus|OH HAI|Mogućnost|Mogucnost|Jellemző|Fīča|Funzionalità|Funktionalität|Funkcionalnost|Funkcionalitāte|Funcționalitate|Functionaliteit|Functionalitate|Funcionalitat|Funcionalidade|Fonctionnalité|Fitur|Feature|Egenskap|Egenskab|Crikey|Característica|Arwedd(.*)/
+  exts "Go", ["go"]
+  head "Go", /-[*]-( Mode:)? Go -[*]-/
   exts "Grails Server Page", ["gsp"]
   exts "Graphviz (DOT)", ["dot", "DOT"]
   exts "Greasemonkey", ["user.js"]

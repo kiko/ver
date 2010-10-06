@@ -95,7 +95,7 @@ module VER
       # @example usage
       #   insert = buffer.at_insert
       #   insert.virtual(&:next_char).delete # delete to next character
-      #   insert.virtual{|ins| ins.end_of_line }.copy # copy until end of line
+      #   insert.virtual{|ins| ins.last_char }.copy # copy until end of line
       def virtual(*args)
         pos = index
         yield(self, *args)
@@ -122,12 +122,31 @@ module VER
         virtual_motion(motion, *args).change
       end
 
+      # if the motion is up-down, we might want to kill whole lines?
+      # that's what vim does, but i don't find it very intuitive or easy to
+      # implement.
       def killing(motion, *args)
         virtual_motion(motion, *args).kill
       end
 
       def deleting(motion, *args)
         virtual_motion(motion, *args).delete
+      end
+
+      def toggle_casing(motion, *args)
+        virtual_motion(motion, *args).toggle_case!
+      end
+
+      def lower_casing(motion, *args)
+        virtual_motion(motion, *args).lower_case!
+      end
+
+      def upper_casing(motion, *args)
+        virtual_motion(motion, *args).upper_case!
+      end
+
+      def encoding_rot13(motion, *args)
+        virtual_motion(motion, *args).encode_rot13!
       end
 
       # {word_right_end} goes to the last character, that is, the insert mark is
@@ -222,15 +241,16 @@ module VER
         else
           buffer.undo_record do |record|
             record.insert("#{self} linestart", "\n")
-            set 'insert - 1 line'
+            set "#{self} - 1 line"
             Methods::Control.clean_line(buffer, "#{self} - 1 line", record)
           end
         end
       end
 
-      # Set mark to be +count+ display-chars to the right, jumps to next line
-      # when on last character of a line.
+      # Set mark to be +count+ display-chars to the right.
+      # Stays on the same line.
       def next_char(count = buffer.prefix_count)
+        return if self == lineend
         set(self + "#{count} displaychars")
       end
 
@@ -257,6 +277,7 @@ module VER
       # Set mark to be +count+ display-chars to the left.
       # Jumps to previous line when on first character of a line.
       def prev_char(count = buffer.prefix_count)
+        return if self == linestart
         set(self - "#{count} displaychars")
       end
 
@@ -272,16 +293,58 @@ module VER
         set(index_at_word_left_end(count))
       end
 
-      def go_line(line = buffer.prefix_count)
-        set("#{line}.0")
+      def first_line(line = buffer.prefix_count)
+        go_first_nonblank(buffer.index("#{line}.0"))
       end
 
-      def go_char(char = buffer.prefix_count)
-        set("#{self} linestart + #{char} chars")
+      def last_line(line = buffer.prefix_count(:end))
+        if line == :end
+          go_first_nonblank(buffer.index("end - 1 chars"))
+        else
+          go_first_nonblank(buffer.index("#{line}.0"))
+        end
+      end
+
+      def go_first_nonblank(index)
+        line = index.get('linestart', 'lineend')
+
+        if first_nonblank = (line =~ /\S/)
+          set("#{index.line}.#{first_nonblank}")
+        else
+          set("#{index.line}.0")
+        end
+      end
+
+      def go_char(char = buffer.prefix_count(0))
+        set("#{self} linestart + #{char} display chars")
       end
 
       def go_line_char(line = nil, char = nil)
         set("#{line || self.line}.#{char || self.char}")
+      end
+
+
+      # Go to {count} percentage in the file, on the first non-blank in the line
+      # linewise. To compute the new line number this formula is used:
+      # ({count} * number-of-lines + 99) / 100
+      def go_percent(count = buffer.prefix_count(nil))
+        raise ArgumentError unless count
+        number_of_lines = buffer.count('1.0', 'end', :lines)
+        line = (count * number_of_lines + 99) / 100
+        go_first_nonblank(buffer.index("#{line}.0"))
+      end
+
+      def down_nonblank(count = buffer.prefix_count)
+        offset = (count - 1).abs
+        go_first_nonblank(buffer.index("insert + #{offset} lines"))
+      end
+
+      def prev_line_nonblank(count = buffer.prefix_count)
+        go_first_nonblank(buffer.index("insert - #{count} lines"))
+      end
+
+      def next_line_nonblank(count = buffer.prefix_count)
+        go_first_nonblank(buffer.index("insert + #{count} lines"))
       end
 
       def start_of_buffer
@@ -298,15 +361,18 @@ module VER
 
       # Move to the end of the line where mark is located.
       #
-      # With +count+ it moves to the end of the display line, so when there is
-      # a line wrap it will move to the place where the line wraps instead of the
-      # real end of the line.
-      def end_of_line(count = buffer.prefix_arg)
-        if count
-          set("#{self} display lineend")
-        else
-          set("#{self} lineend")
-        end
+      # With +count+ it moves to the end of line +count+ lines below.
+      def last_char(count = buffer.prefix_count)
+        set("#{self} + #{count - 1} lines lineend")
+      end
+
+      # Move to the middle of the display line.
+      # Vim moves to the middle of the screen width...
+      # not so useful, but in order to be compatible, do that instead.
+      def middle_of_line
+        x, y, width, height, baseline = *buffer.dlineinfo(self)
+        middle = width / 2
+        set("@#{middle},#{y}")
       end
 
       # Move to the beginning of the line in which insert mark is located.
@@ -321,17 +387,10 @@ module VER
         end
       end
 
-      # Move to the first character of the line in which insert mark is located.
-      #
-      # With +count+ it will move to the linestart of the displayed, taking
-      # linewraps into account.
-      def home_of_line(alternative = buffer.prefix_arg)
-        if alternative
-          start_of_line(alternative)
-        else
-          char = get('linestart', 'lineend').index(/\S/) || 0
-          self.char = char
-        end
+      # Move to the non-blank character of the line in which insert mark is located.
+      def home_of_line
+        char = get('linestart', 'lineend').index(/\S/) || 0
+        self.char = char
       end
 
       def end_of_sentence(count = buffer.prefix_count)
@@ -343,17 +402,38 @@ module VER
       end
 
       def matching_brace(count = buffer.prefix_count)
-        set(matching_brace_index(count))
+        from, to = matching_brace_indices(count)
+        index = self.index
+
+        if index < from
+          set(from)
+        elsif index == from
+          set(to)
+        elsif index > to
+          set(to)
+        elsif index == to
+          set(from)
+        else
+          if from.delta(index) < to.delta(index)
+            set(from)
+          else
+            set(to)
+          end
+        end
       end
 
-      def matching_brace_index(count = 1)
-        opening = get
+      def matching_brace_indices(count = 1)
+        needle = Regexp.union(MATCHING_BRACE_RIGHT.to_a.flatten.sort.uniq)
+        from = buffer.search_all(needle, self){|match, range| break range }
+        return unless from
+
+        opening = from.get
 
         if closing = MATCHING_BRACE_RIGHT[opening]
-          start = self + '1 chars'
+          start = from + '1 chars'
           search = buffer.method(:search_all)
         elsif closing = MATCHING_BRACE_LEFT[opening]
-          start = index
+          start = from.index
           search = buffer.method(:rsearch_all)
         else
           return
@@ -370,7 +450,7 @@ module VER
           end
 
           if balance == 0
-            return range
+            return [from, range].sort
           end
         }
       end

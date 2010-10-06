@@ -1,6 +1,10 @@
 module VER
   class Text
     class Selection < Tag
+      autoload :Char, 'ver/text/selection/char'
+      autoload :Line, 'ver/text/selection/line'
+      autoload :Block, 'ver/text/selection/block'
+
       def self.enter(buffer, old_mode, new_mode)
         buffer.at_sel.enter(old_mode, new_mode)
       end
@@ -72,6 +76,7 @@ module VER
 
       def copy
         super
+        buffer.insert = "#{self}.first"
         clear
         finish
       end
@@ -80,6 +85,11 @@ module VER
         super
         clear
         finish
+      end
+
+      def change
+        kill
+        buffer.minor_mode(:control, :insert)
       end
 
       def wrap
@@ -100,6 +110,32 @@ module VER
       end
 
       def evaluate!
+        super
+        clear
+        finish
+      end
+
+      def toggle_case!
+        super
+        clear
+        finish
+      end
+
+      def lower_case!
+        super
+        clear
+        finish
+      end
+      alias downcase! lower_case!
+
+      def upper_case!
+        super
+        clear
+        finish
+      end
+      alias upcase! upper_case!
+
+      def encode_rot13!
         super
         clear
         finish
@@ -129,119 +165,238 @@ module VER
         finish
       end
 
-      class Char < Selection
-        # For every chunk selected, this yields the corresponding coordinates as
-        # [from_y, from_x, to_y, to_x].
-        # It takes into account the current selection mode.
-        # In many cases from_y and to_y are identical, but don't rely on this.
-        #
-        # @see each_line
-        def each
-          return Enumerator.new(self, :each) unless block_given?
+      # Replace every character in the selection with the character entered.
+      def replace_char(char = buffer.events.last.unicode)
+        replace_with_string(char, expand = true)
+        buffer.minor_mode(:select_replace_char, mode_name)
+      end
 
-          each_range do |range|
-            (fy, fx), (ty, tx) = *range.first, *range.last
-
-            if fy == ty
-              yield fy, fx, ty, tx
-            elsif (ty - fy) == 1
-              efy, efx = text.index("#{fy}.#{fx} lineend").split
-              sty, stx = text.index("#{ty}.#{tx} linestart").split
-              yield fy, fx, efy, efx
-              yield sty, stx, ty, tx
+      # Ask for a string that every chunk of the selection should be replaced with
+      def replace_string
+        buffer.ask 'Replace selection with: ', do |answer, action|
+          case action
+          when :attempt
+            if answer.size > 0
+              replace_with_string(answer, expand = false)
+              buffer.message "replaced #{answer.size} chars"
+              :abort
             else
-              efy, efx = text.index("#{fy}.#{fx} lineend").split
-              yield fy, fx, efy, efx
+              buffer.warn "replacement required"
+            end
+          end
+        end
+      end
 
-              ((fy + 1)...ty).each do |y|
-                sy, sx = text.index("#{y}.0 linestart").split
-                ey, ex = text.index("#{y}.0 lineend").split
-                yield sy, sx, ey, ex
+      def replace_with_clipboard
+        return unless string = VER::Clipboard.string
+        ranges = buffer.tag_ranges(:sel)
+        from, to = ranges.first.first, ranges.last.last
+        replace(from, to, string)
+        finish
+        buffer.mark_set :insert, from
+      end
+
+      def replace_with_string(string, expand)
+        insert = buffer.index(:insert)
+        anchor = self.anchor.index
+
+        buffer.undo_record do |record|
+          if expand
+            each_range do |range|
+              current = range.count(:displaychars)
+              record.replace(*range, string * current)
+            end
+          else
+            each_line do |y, fx, tx|
+              record.replace("#{y}.#{fx}", "#{y}.#{tx}", string)
+            end
+
+            offset = (anchor.char + string.size) - 1
+            buffer.insert = insert.linestart + "#{offset} chars"
+          end
+        end
+
+        self.anchor.index = anchor
+        refresh
+      end
+
+      # Press <Shift-F7> to work with the text as if it were one big string (multiple
+      # for Ruby code that uses the variable "str".  For example, entering
+      #
+      # str.upcase
+      #
+      # will convert the selected text to uppercase.
+      def string_operation
+        buffer.ask 'Ruby code: ', value: 'str.' do |code, action|
+          case action
+          when :attempt
+            begin
+              string_operation!(code)
+            rescue Exception => ex
+              VER.warn(ex)
+              buffer.warn(ex)
+            else
+              clear
+              finish
+              :abort
+            end
+          end
+        end
+      end
+
+      # Provide a restricted scope so people cannot interfere with undo or
+      # MiniBuffer.
+      def string_operation!(code)
+        replace(string_operation_eval(code, get))
+      end
+
+      def string_operation_eval(code, str)
+        eval(code).to_str
+      end
+
+      def array_operation
+        buffer.ask 'Ruby code: ', value: 'lines.' do |code, action|
+          case action
+          when :attempt
+            begin
+              array_operation!(code)
+            rescue Exception => ex
+              VER.error(ex)
+              buffer.warn(ex)
+            else
+              clear
+              finish
+              :abort
+            end
+          end
+        end
+      end
+
+      def array_operation!(code)
+        lines = []
+        first = last = nil
+
+        each do |from_line, from_char, to_line, to_char|
+          from_line.upto to_line do |lineno|
+            from, to = "#{lineno}.0", "#{lineno}.0 lineend"
+            first ||= from
+            last = to
+
+            line = buffer.get(from, to)
+            lines << line
+          end
+        end
+
+        buffer.undo_record do |record|
+          modified = array_operation_eval(code, lines)
+          record.replace(first, last, modified.join("\n"))
+        end
+      end
+
+      # Provide a restricted scope so people cannot interfere with undo or
+      # MiniBuffer.
+      def array_operation_eval(code, lines)
+        eval(code).to_a
+      end
+
+      # Press <F7> to iterate over each line of selected text.  You will be prompted
+      # for Ruby code which will act as the body of a Ruby block which uses the
+      # variable "line" and evaluates to a String.  For example:
+      #
+      #   line.strip.squeeze( ' ' )
+      #
+      # will strip off whitespace from the beginning and end of each line and then
+      # collapse all consecutive sequences of spaces into single spaces.
+      def line_operation
+        buffer.ask 'Ruby code: ', value: 'line.' do |code, action|
+          case action
+          when :attempt
+            begin
+              line_operation!(code)
+            rescue Exception => ex
+              VER.error(ex)
+              buffer.warn(ex)
+            else
+              clear
+              finish
+              :abort
+            end
+          end
+        end
+      end
+
+      def line_operation!(code)
+        buffer.undo_record do |record|
+          each do |from_line, from_char, to_line, to_char|
+            from_line.upto to_line do |lineno|
+              from, to = "#{lineno}.0", "#{lineno}.0 lineend"
+              line = buffer.get(from, to)
+              modified = line_operation_eval(code, line)
+              record.replace(from, to, modified)
+            end
+          end
+        end
+      end
+
+      # Provide a restricted scope so people cannot interfere with undo or
+      # MiniBuffer.
+      def line_operation_eval(code, line)
+        eval(code).to_str
+      end
+
+      def change_linestart
+        first_line, last_line = first.line, last.line
+        buffer.ask 'Insert text at linestart: ' do |text, action|
+          case action
+          when :attempt
+            buffer.undo_record do |record|
+              first_line.upto last_line do |line|
+                record.insert("#{line}.0", text)
               end
-
-              sty, stx = text.index("#{ty}.#{tx} linestart").split
-              yield sty, stx, ty, tx
             end
-          end
-        end
-
-        def refresh
-          return unless @refresh
-          start  = anchor.index
-          insert = buffer.at_insert
-          clear
-
-          if insert > start
-            add(start, insert + '1 chars')
-          else
-            add(insert, start + '1 chars')
+            :abort
           end
         end
       end
 
-      class Line < Selection
-        def each
-          return Enumerator.new(self, :each) unless block_given?
-
-          each_range do |range|
-            (fy, fx), (ty, tx) = *range.first, *range.last
-
-            fy.upto(ty) do |y|
-              sy, sx = text.index("#{y}.0 linestart").split
-              ey, ex = text.index("#{y}.0 lineend").split
-              yield sy, sx, ey, ex
+      def change_lineend
+        first_line, last_line = first.line, last.line
+        buffer.ask 'Insert text at linestart: ' do |text, action|
+          case action
+          when :attempt
+            buffer.undo_record do |record|
+              first_line.upto last_line do |line|
+                record.insert("#{line}.0 lineend", text)
+              end
             end
-          end
-        end
-
-        def refresh
-          return unless @refresh
-          start = anchor.index
-          insert = buffer.at_insert
-          clear
-
-          if insert > start
-            add(start.linestart, insert.lineend)
-          else
-            add(insert.linestart, start.lineend)
+            :abort
           end
         end
       end
 
-      class Block < Selection
-        def each
-          return Enumerator.new(self, :each) unless block_given?
+      def join(separator = ' ')
+        buffer.undo_record do |record|
+          first_line, last_line = first.line, last.line
 
-          each_range do |range|
-            (fy, fx), (ty, tx) = *range.first, *range.last
-            yield fy, fx, ty, tx
+          first_line.upto(last_line - 1) do |line|
+            line = first_line
+
+            left  = buffer.get("#{line}.0", "#{line}.0 lineend").rstrip
+            right = buffer.get("#{line + 1}.0", "#{line + 1}.0 lineend").lstrip
+            left << separator
+
+            # first replace the right hand, which is the second line.
+            record.replace("#{line + 1}.0", "#{line + 1}.0 lineend", right, 'sel')
+            # put insert cursor at start of second line.
+            buffer.insert = "#{line + 1}.0"
+            # and finally join the two lines.
+            record.replace("#{line}.0", "#{line}.0 lineend + 1 chars", left, 'sel')
           end
         end
 
-        def refresh
-          return unless @refresh
-          start  = anchor.index
-          insert = buffer.at_insert
-          clear
-
-          ly, lx, ry, rx =
-            if insert > start
-              [*insert, *start]
-            else
-              [*start, *insert]
-            end
-
-          from_y, to_y = [ly, ry].sort
-          from_x, to_x = [lx, rx].sort
-
-          ranges = []
-          from_y.upto to_y do |y|
-            ranges << "#{y}.#{from_x}" << "#{y}.#{to_x + 1}"
-          end
-
-          add(*ranges)
-        end
+        clear
+        finish
       end
-    end
-  end
-end
+    end # Selection
+  end # Text
+end # VER

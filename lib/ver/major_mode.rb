@@ -12,14 +12,17 @@ module VER
   # specialize it.
   # The inherited keymap is duplicated upon inheritance and the original will
   # not be modified, the duplicate is merged in a manner that will not replace
-  # existing sequences.
+  # existing patterns.
   #
   # The bound_keys property acts as a cache of the keys bound to the tag, so we
   # don't have to query the tag, as the bound proc is the same for all keys.
   class MajorMode < Struct.new(:name, :minors, :keymap, :receiver,
                                :fallback_action, :tag, :bound_keys)
 
+    include Platform
+    include ModeResolving
     include Keymap::Results
+
     MODES = {}
 
     def self.[](name)
@@ -50,8 +53,8 @@ module VER
       self.bound_keys = Set.new
       self.tag = Tk::BindTag.new("#{name}-mode")
 
-      FakeEvent.each{|event| bind_key(event.sequence) }
-      bind_key('<Escape>')
+      # and now register all we didn't have yet.
+      Event.each{|event| bind_key(event) }
     end
 
     def destroy
@@ -63,26 +66,25 @@ module VER
       self.receiver = object
     end
 
-    def map(invocation, *sequences)
-      action = Action.new(invocation, receiver)
-      sequences.each{|sequence| keymap[sequence] = action }
+    def map(invocation, *patterns)
+      action = Action.new(invocation, receiver, self)
+      patterns.each{|pattern| keymap[pattern] = action }
     end
 
     def missing(invocation)
-      action = Action.new(invocation, receiver)
+      action = Fallback.new(invocation, receiver, self)
       self.fallback_action = action
-      keymap['<Key>'] = action
     end
 
     def enter(invocation)
-      action = Action.new(invocation, receiver)
+      action = Action.new(invocation, receiver, self)
       tag.bind "<<EnterMajorMode#{to_camel_case}>>" do |event|
         action.call(WidgetEvent.new(event.widget, event))
       end
     end
 
     def leave(invocation)
-      action = Action.new(invocation, receiver)
+      action = Action.new(invocation, receiver, self)
       tag.bind "<<LeaveMajorMode#{to_camel_case}>>" do |event|
         action.call(WidgetEvent.new(event.widget, event))
       end
@@ -105,31 +107,9 @@ module VER
       self.minors -= minors.map{|name| MinorMode[name] }
     end
 
-    # recursively try to find the sequence in the major mode and its minor
-    # modes.
-    def resolve(sequence, minors = [])
-      case found = keymap[sequence]
-      when Incomplete
-        minors.each do |minor|
-          case resolved = minor.resolve(sequence)
-          when Incomplete
-            found.merge!(resolved)
-          end
-        end
-      when Impossible
-        minors.find do |minor|
-          found = minor.resolve(sequence)
-          !found.kind_of?(Impossible)
-        end
-      else
-        found = [self, found]
-      end
-
-      if found.kind_of?(Impossible) && fa = self.fallback_action
-        return self, fa
-      else
-        return found
-      end
+    # recursively try to find the pattern in the major mode and its minors.
+    def resolve(pattern, minors = [])
+      super
     end
 
     def replace_minor(old, new)
@@ -139,14 +119,23 @@ module VER
     end
 
     def bind_key(key)
-      return if bound_keys.include?(key)
+      case key
+      when Event
+        pattern = key.pattern
+      when String
+        pattern = Event[key].pasttern
+      else
+        raise ArgumentError, "Invalid key: %p" % [key]
+      end
 
-      tag.bind(key) do |event|
+      return if bound_keys.include?(pattern)
+
+      tag.bind(pattern) do |event|
         event.widget.major_mode.on_event(event)
         Tk.callback_break
       end
 
-      bound_keys << key
+      bound_keys << pattern
     end
 
     def actions

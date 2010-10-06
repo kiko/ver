@@ -6,7 +6,7 @@ VER.options.dsl do
     :http_browser, (ENV['BROWSER'] || %w[links -g])
 
   o "Sequence to comment a line, may change through file type preferences",
-    :comment_line, '#'
+    :comment_line, '# '
 
   o "Start and end sequence to comment a region, may change through file type preferences",
     :comment_region, ['=begin', '=end']
@@ -24,7 +24,7 @@ VER.options.dsl do
     :font, "TkFixedFont 10"
 
   o "Fork off on startup to avoid dying with the terminal",
-    :fork, true
+    :fork, VER::Platform.unix?
 
   o "Use EventMachine inside VER, at the moment only for the console",
     :eventmachine, false

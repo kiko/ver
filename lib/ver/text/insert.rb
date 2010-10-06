@@ -13,9 +13,21 @@ module VER
       end
       alias index= set
 
-      def end_of_line(count_or_mode = nil)
-        super
-        buffer.minor_mode(:control, count_or_mode) if count_or_mode.is_a?(Symbol)
+      # Kill contents of the line at position, switch from control to
+      # insert mode.
+      # Always leaves an empty line and sets the insert mark inside that.
+      def change_line(count = buffer.prefix_count)
+        from, to = "insert linestart", "insert + #{count - 1} lines lineend"
+        range = buffer.range(buffer.index(from), buffer.index(to))
+        range.kill
+        buffer.minor_mode(:control, :insert)
+      end
+
+      def change(count = buffer.prefix_count)
+        from, to = "insert", "insert + #{count} displaychars"
+        range = buffer.range(buffer.index(from), buffer.index(to))
+        range.kill
+        buffer.minor_mode(:control, :insert)
       end
 
       # Same as {Mark.forward_jump}, but generate <<Movement>> event.
@@ -47,6 +59,24 @@ module VER
         set(buffer.up_down_line(count))
       end
 
+      def insert_char_above
+        index = buffer.index("#{self} - 1 lines")
+
+        if index.line < line && index.char == char
+          char = index.get
+          buffer.insert(self, char) unless char == "\n"
+        end
+      end
+
+      def insert_char_below
+        index = buffer.index("#{self} + 1 lines")
+
+        if index.line > line && index.char == char
+          char = index.get
+          buffer.insert(self, char) unless char == "\n"
+        end
+      end
+
       def insert_newline_below
         return insert_indented_newline_below if buffer.options.autoindent
         super
@@ -68,10 +98,24 @@ module VER
         buffer.minor_mode(:control, :insert)
       end
 
+      def insert_digraph
+        buffer.major_mode.read 2 do |*events|
+          require 'ver/digraphs'
+          first, last = events.first.unicode, events.last.unicode
+          if found = DIGRAPHS["#{first}#{last}"]
+          elsif found = DIGRAPHS["#{last}#{first}"]
+          else
+            # some kinda error?
+          end
+
+          buffer.insert(self, found) if found
+        end
+      end
+
       # Set insert mark to a position in the previous page in buffer.
       # Also sets the insert mark to the position it used to be on the old view.
       #
-      # @params [Integer] count
+      # @param [Integer] count
       #   Number of pages to scroll
       def prev_page(count = buffer.prefix_count)
         set(buffer.tk_prev_page_pos(count))
@@ -80,10 +124,14 @@ module VER
       # Scroll down the view of buffer by +count+ number of pages.
       # Also sets the insert mark to the position it used to be on the old view.
       #
-      # @params [Integer] count
+      # @param [Integer] count
       #   Number of pages to scroll
       def next_page(count = buffer.prefix_count)
         set(buffer.tk_next_page_pos(count))
+      end
+
+      def toggle_case!
+        super
       end
     end
   end

@@ -2,9 +2,16 @@ module VER
   class MiniBuffer < Text
     HISTORY = Hash.new{|h,k| h[k] = SizedArray.new(50) }
 
+    # NOTE:
+    #   {Text#dump} on a peer text widget causes segfault, I've reported the
+    #   issue to the tk maintainers and they are working on it.
+    #   All tcl/tk versions are affected AFAIK, take care.
     class Peer < MiniBuffer
-      def initialize(text, parent, options = {})
+      attr_reader :buffer
+
+      def initialize(text, parent, buffer, options = {})
         @tk_parent = parent
+        @buffer = buffer
         @tk_pathname = Tk.register_object(parent, self)
         Tk.execute(text.tk_pathname, 'peer', 'create', @tk_pathname, options)
         setup_common
@@ -20,17 +27,17 @@ module VER
 
     include Keymapped
 
-    attr_accessor :messages_expire, :messages_pending, :char_width, :ask_stack,
+    attr_accessor :messages_expire, :char_width, :ask_stack,
                   :at_insert, :completion_buffer
-    attr_reader :asking
+    attr_reader :asking, :messages, :messages_pending, :buffer
 
     def initialize(*args)
       super
       setup
     end
 
-    def peer_create(*args)
-      Peer.new(self, *args)
+    def peer_create(parent, buffer, *args)
+      Peer.new(self, parent, buffer, *args)
     end
 
     def setup
@@ -92,7 +99,8 @@ module VER
 
       self.major_mode = :MiniBuffer
       self.messages_expire = false
-      self.messages_pending = Hash.new(0)
+      @messages_pending = Hash.new(0)
+      @messages = SizedArray.new(10)
       self.char_width = VER.options.font.measure('0')
       self.ask_stack = []
       self.at_insert = mark(:insert)
@@ -130,10 +138,14 @@ module VER
         grid_configure(@old_grid_info) if @old_grid_info
         configure(height: height)
       end
-    rescue
+
+      # a generous 25ms to make sure the display is updated.
+      # Might need longer, lemme know if that's the case.
+      Tk::After.ms(25){ buffer.adjust_sight } if buffer
+    rescue => ex
+      VER.error(ex)
     end
 
-    PROMPT_MISSING = %(text doesn't contain any characters tagged with "prompt")
     def prompt=(value)
       replace('prompt', 'prompt.last', value, 'prompt')
     end
@@ -142,7 +154,6 @@ module VER
       get_displaychars('prompt', 'prompt.last')
     end
 
-    ANSWER_MISSING = %(text doesn't contain any characters tagged with "answer")
     def answer=(value)
       replace('answer', 'answer.last', value, 'answer')
     end
@@ -167,7 +178,7 @@ module VER
 
       begin
         replace("#{tag}.first", "#{tag}.last", " #{string}", tag)
-        mark(tag, "#{tag}.first", :left)
+        # mark(tag, "#{tag}.first", :left)
       rescue
         begin
           insert(tag, " #{string}", tag)
@@ -177,8 +188,9 @@ module VER
       end
 
       if string.to_s.strip != ''
+        messages << string
         message_expire(tag) #  if messages_expire
-        message_notify(tag)
+        # message_notify(tag)
       end
       adjust_size
 
@@ -315,12 +327,8 @@ module VER
 
     def invoke(action, *args)
       Tk::Event.generate(self, "<<#{action.capitalize}>>")
-      case result = @action.call(answer, action, *args)
-      when :abort
-        abort
-      else
-        result
-      end
+      result = @action.call(answer, action, *args)
+      result == :abort ? abort : result
     end
 
     def events
@@ -328,9 +336,9 @@ module VER
     end
 
     def insert_string
-      case string = events.last[:unicode]
-      when /^([[:word:][:ascii:]]| )+$/
-        insert(:insert, string, @answer)
+      case string = events.last.unicode
+      when /^[^\n\r[:cntrl:]]+$/
+        insert(:insert, string, 'answer')
         invoke(:modified)
       else
         l insert_string: string
@@ -353,30 +361,32 @@ module VER
     end
 
     def kill_end_of_line(event = nil)
+      content = get_displaychars('insert', 'answer.last')
+      copy(content) if content =~ /\S/
       delete('insert', 'answer.last')
       invoke(:modified)
     end
 
-    def kill_next_char(event = nil)
-      delete('insert')
+    def delete_next_char(event = nil)
+      return unless line = get_displaychars('insert', 'answer.last')
+      delete('insert') unless line == ''
       invoke(:modified)
     end
 
-    def kill_next_word(event = nil)
+    def delete_next_word(event = nil)
       line = get_displaychars('insert', 'answer.last')
       return unless word = line[/^\s*(?:\w+|[^\w\s]+)\s*/]
       delete('insert', "insert + #{word.size} chars")
       invoke(:modified)
     end
 
-    def kill_prev_char(event = nil)
-      if compare('insert', '>', 'answer')
-        delete('insert - 1 display chars')
-        invoke(:modified)
-      end
+    def delete_prev_char(event = nil)
+      return unless compare('insert', '>', 'answer')
+      delete('insert - 1 display chars')
+      invoke(:modified)
     end
 
-    def kill_prev_word(event = nil)
+    def delete_prev_word(event = nil)
       line = get_displaychars('answer', 'insert').reverse
       return unless word = line[/^\s*(?:\w+|[^\w\s]+)\s*/]
       delete("insert - #{word.size} display chars", 'insert')
@@ -406,6 +416,16 @@ module VER
       line[0, 2] = line[0, 2].reverse
       replace('insert', 'answer.last', line, 'answer')
       mark_set('insert', insert)
+      invoke(:modified)
+    end
+
+    def copy(string)
+      Clipboard.dwim = string
+    end
+
+    def paste(event = nil)
+      return unless content = Clipboard.dwim
+      insert(:insert, content, 'answer')
       invoke(:modified)
     end
 

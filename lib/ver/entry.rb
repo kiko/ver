@@ -53,7 +53,11 @@ module VER
       Tk::Event.generate(self, '<<Deleted>>')
       Tk::Event.generate(self, '<<Modified>>')
     end
-    alias kill delete # nobody wants to copy that way, right? ;)
+
+    def kill(*args)
+      Clipboard.dwim = get(*args)
+      delete(*args)
+    end
 
     def cursor=(pos)
       selection_clear
@@ -77,6 +81,11 @@ module VER
       insert(cursor, "\t")
     end
 
+    def paste
+      return unless content = VER::Clipboard.get
+      insert(cursor, content)
+    end
+
     def transpose_chars
       char = get[cursor]
       delete(cursor)
@@ -85,32 +94,32 @@ module VER
 
     ## Delete
 
-    def delete_motion(motion)
+    def deleting(motion)
       delete(*virtual_movement(motion))
     end
 
-    def kill_motion(motion)
+    def killing(motion)
       kill(*virtual_movement(motion))
     end
 
-    def kill_prev_char
-      kill_motion :prev_char
+    def delete_prev_char
+      deleting :prev_char
     end
 
-    def kill_next_char
-      kill_motion :next_char
+    def delete_next_char
+      deleting :next_char
     end
 
-    def kill_prev_word
-      kill_motion :prev_word
+    def delete_prev_word
+      deleting :prev_word
     end
 
-    def kill_next_word
-      kill_motion :next_word
+    def delete_next_word
+      deleting :next_word
     end
 
     def kill_end_of_line
-      kill_motion :end_of_line
+      killing :end_of_line
     end
 
     ## Selection
@@ -219,8 +228,6 @@ module VER
       @history_index = 0
       self.value = @history[@history_index]
     end
-
-    ## Asking questions
 
     # Accept the line regardless of where the cursor is.
     # If this line is non-empty, it will be added to the history list.

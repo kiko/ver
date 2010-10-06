@@ -1,96 +1,117 @@
 require_relative '../../helper'
 
-shared :with_buffer do
-  before do
-    @buffer ||= VER::Buffer.new
-    @buffer.value = <<-TEXT
-Fugiat eos voluptatum officia fugit ad sit qui.
-Alias et voluptas sapiente sed.
-Unde ut qui esse repellendus sunt dolorum officia.
-Officia accusamus perferendis ab.
-Nesciunt repellendus et recusandae dolorum quis repudiandae ad minima.
-Ducimus quo et ea.
-Qui cumque blanditiis aliquam accusamus perspiciatis provident sapiente fuga.
-    TEXT
-    @buffer.insert = '1.0'
-    @buffer.major_mode = VER::MajorMode[:Fundamental]
-    @insert = @buffer.at_insert
+shared :common_key_spec do
+  def keys(*names, desc)
+    names.each do |name|
+      title = "%-6s\t%s" % [name, desc]
+      it(title){ yield(name) }
+    end
   end
+  alias key keys
 
-  after do
-    @buffer.value = ''
-  end
-
-  def buffer
-    @buffer
-  end
-
-  def insert
-    @insert
-  end
-
-  def type(string)
-    buffer.type(string)
-  end
-
-  def minibuf
-    buffer.minibuf
-  end
-
-  def clipboard
-    VER::Clipboard.get
-  end
-
-  def clipboard_set(string)
-    VER::Clipboard.set(string)
+  # Currently we skip specs that rely on specific window size or font.
+  # Simply add a spec and put `skip` inside as a kind of TODO marker.
+  def skip
+    'skip spec until we find good way to implement it'.should.not.be.nil
   end
 end
 
-shared :control_mode do
+shared :key_spec do
   behaves_like :with_buffer
-
-  before do
-    buffer.minor_mode?(:insert).should == nil
-    clipboard_set 'foo'
-  end
+  behaves_like :common_key_spec
 end
 
-VER.spec keymap: 'vim' do
+shared :destructive_key_spec do
+  behaves_like :destructive_mode
+  behaves_like :common_key_spec
+end
+
+__END__
+
+# Show the buffer to get accurate behaviour
+VER.spec keymap: 'vim', hidden: false do
   describe 'Keymap for VIM' do
-    describe 'Control mode movement' do
-      behaves_like :with_buffer
+    describe 'Control mode changing' do
+      behaves_like :destructive_mode
 
-      it 'goes to first column with <0>' do
-        buffer.insert = '1.5'
-        type '0'
-        insert.should == '1.0'
+      it 'changes at end of line with <A>' do
+        type 'A'
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 41
+        insert.index.should == '1.0 lineend'
+        buffer.minor_mode?(:insert).should != nil
       end
 
-      it 'goes to end of buffer with <G>' do
-        type 'G'
-        insert.should == 'end - 1 chars'
+      it 'changes at next char with <a>' do
+        type 'a'
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 41
+        insert.index.should == '1.1'
+        buffer.minor_mode?(:insert).should != nil
       end
 
-      it 'goes to last column with <dollar> ($)' do
-        type '<dollar>'
-        insert.should == '1.0 lineend'
+      it 'changes at home of line with <I>' do
+        insert.index = '1.10'
+        type 'I'
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 41
+        insert.index.should == '1.0'
+        buffer.minor_mode?(:insert).should != nil
       end
 
-      it 'goes to last column with <End>' do
-        type '<End>'
-        insert.should == '1.0 lineend'
+      it 'searches expression forward with <slash>' do
+        type '/officiis<Return>'
+
+        # Make sure input is handled correctly.
+        # If the MiniBuffer wasn't invoked, we'll have garbage in the Buffer.
+        buffer.value.chomp.should == BUFFER_VALUE
+
+        # all matches should be tagged.
+        ranges = buffer.tag(VER::Methods::Search::TAG).ranges
+        ranges.should == [
+          range( '2.11',  '2.19'),
+          range('13.15', '13.23'),
+          range('18.19', '18.27'),
+          range('28.14', '28.22'),
+        ]
+
+        # must be at position of first match.
+        insert.index.should == ranges.first.first
+
+        # find all successive matches
+        ranges.each do |range|
+          insert.index.should == range.first
+          type 'n'
+        end
+
+        # last match, so no movement
+        insert.index.should == ranges.last.first
+
+        # go back again through all matches
+        ranges.reverse_each do |range|
+          insert.index.should == range.first
+          type 'N'
+        end
+
+        # first match, so no movement
+        insert.index.should == ranges.first.first
       end
 
-      it 'goes to start of buffer with <g><g>' do
-        buffer.insert = 'end'
-        type 'gg'
-        insert.should == '1.0'
+      it 'removes the search tag with <g><slash>' do
+        tag = buffer.tag(VER::Methods::Search::TAG)
+        tag.ranges.should.be.empty
+        type '/officiis<Return>'
+        tag.ranges.should.not.be.empty
+        type 'g/'
+        tag.ranges.should.be.empty
       end
 
-      it 'goes to arbitrary line with \d+<g><g>' do
-        type '5gg'
-        insert.line.should == 5
+      it 'searches the next word under the cursor with <asterisk>' do
+        insert.index = '1.25'
+        type '*'
+        insert.index.should == '5.5'
       end
+    end
+
+    describe 'Matching brace related' do
+      behaves_like :destructive_mode
 
       it 'goes to matching brace with <percent> (%)' do
         buffer.value = '(Veniam (vitae (ratione (facere))))'
@@ -98,149 +119,31 @@ VER.spec keymap: 'vim' do
         type '<percent>'
         insert.index.should == '1.34'
       end
-
-      it 'goes to next char with <l> and <Right>' do
-        type 'l'
-        insert.should == '1.1'
-        type '<Right>'
-        insert.should == '1.2'
-      end
-
-      it 'goes to prev char with <h> and <Left>' do
-        buffer.insert = '1.5'
-        type 'h'
-        insert.should == '1.4'
-        type '<Left>'
-        insert.should == '1.3'
-      end
-
-      it 'goes to next chunk with <W>' do
-        type 'W'
-        insert.index.should == '1.7'
-      end
-
-      it 'goes to next line with <j>, <Down>, and <Control-n>' do
-        type 'j'
-        buffer.count('1.0', 'insert', :displaylines).should == 1
-        type '<Down>'
-        buffer.count('1.0', 'insert', :displaylines).should == 2
-        type '<Control-n>'
-        buffer.count('1.0', 'insert', :displaylines).should == 3
-      end
-
-      it 'goes to next page with <Control-f> and <Next>' do
-        type '<Control-f>'
-        buffer.count('1.0', 'insert', :displaylines).should == 1
-        type '<Next>'
-        buffer.count('1.0', 'insert', :displaylines).should == 2
-      end
-
-      it 'goes to next word with <w> and <Shift-Right>' do
-        type 'w'
-        insert.index.should == '1.7'
-        type '<Shift-Right>'
-        insert.index.should == '1.11'
-      end
-
-      it 'goes to next chunk end with <E>' do
-        type 'E'
-        insert.index.should == '1.5'
-      end
-
-      it 'goes to next word end with <e>' do
-        type 'e'
-        insert.index.should == '1.5'
-      end
-
-      it 'goes to prev chunk with <B>' do
-        insert.index = 'end'
-        type 'B'
-        insert.index.should == '7.72'
-      end
-
-      it 'goes to prev line with <k>, <Up>, and <Control-p>' do
-        insert.index = 'end'
-        type 'k'
-        buffer.count('insert', 'end', :displaylines).should == 2
-        type '<Up>'
-        buffer.count('insert', 'end', :displaylines).should == 3
-        type '<Control-p>'
-        buffer.count('insert', 'end', :displaylines).should == 4
-      end
-
-      it 'goes to prev page with <Control-b> and <Prior>' do
-        insert.index = 'end'
-        type '<Control-b>'
-        insert.index.should == '8.0'
-        type '<Prior>'
-        insert.index.should == '8.0'
-      end
-
-      it 'goes to prev word with <b> and <Shift-Left>' do
-        insert.index = '1.10'
-        type 'b'
-        insert.index.should == '1.7'
-        type '<Shift-Left>'
-        insert.index.should == '1.0'
-      end
-
-      it 'goes to start of line with <Home>' do
-        insert.index = '1.10'
-        type '<Home>'
-        insert.index.should == '1.0'
-      end
-
-      it 'changes at end of line with <A>' do
-        buffer.minor_mode?(:insert).should == nil
-        insert.index = '1.0'
-        type 'A'
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 47
-        insert.index.should == '1.0 lineend'
-        buffer.minor_mode?(:insert).should != nil
-      end
-
-      it 'changes at next char with <a>' do
-        buffer.minor_mode?(:insert).should == nil
-        insert.index = '1.0'
-        type 'a'
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 47
-        insert.index.should == '1.1'
-        buffer.minor_mode?(:insert).should != nil
-      end
-
-      it 'changes at home of line with <I>' do
-        buffer.minor_mode?(:insert).should == nil
-        insert.index = '1.10'
-        type 'I'
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 47
-        insert.index.should == '1.0'
-        buffer.minor_mode?(:insert).should != nil
-      end
     end
 
     describe 'Control mode deletion' do
-      behaves_like :control_mode
+      behaves_like :destructive_mode
 
       it 'changes movement with <c> prefix' do
         type 'cl'
-        clipboard.should == 'F'
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 46
+        clipboard.should == 'I'
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 40
         buffer.minor_mode?(:insert).should != nil
         insert.index.should == '1.0'
       end
 
       it 'changes to right end of next word with <c><w>' do
         type 'cw'
-        clipboard.should == "Fugiat"
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 41
+        clipboard.should == "Inventore"
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 32
         buffer.minor_mode?(:insert).should != nil
         insert.index.should == '1.0'
       end
 
       it 'changes a line with <c><c>' do
         type 'cc'
-        clipboard.should == "Fugiat eos voluptatum officia fugit ad sit qui.\n"
-        buffer.count('1.0', 'end', :lines).should == 7
+        clipboard.should == "Inventore voluptatibus dolorem assumenda.\n"
+        buffer.count('1.0', 'end', :lines).should == 40
         buffer.minor_mode?(:insert).should != nil
         insert.index.should == '1.0'
       end
@@ -248,16 +151,16 @@ VER.spec keymap: 'vim' do
       it 'kills movement with <d> prefix' do
         insert.index = '1.1'
         type 'dl'
-        clipboard.should == 'u'
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 46
+        clipboard.should == 'n'
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 40
         buffer.minor_mode?(:insert).should == nil
         insert.index.should == '1.1'
       end
 
       it 'kills a line with <d><d>' do
         type 'dd'
-        clipboard.should == "Fugiat eos voluptatum officia fugit ad sit qui.\n"
-        buffer.count('1.0', 'end', :lines).should == 7
+        clipboard.should == "Inventore voluptatibus dolorem assumenda.\n"
+        buffer.count('1.0', 'end', :lines).should == 40
         buffer.minor_mode?(:insert).should == nil
         insert.index.should == '1.0'
       end
@@ -265,7 +168,7 @@ VER.spec keymap: 'vim' do
       it 'changes to end of line with <C>' do
         insert.index = '1.1'
         type 'C'
-        clipboard.should == 'ugiat eos voluptatum officia fugit ad sit qui.'
+        clipboard.should == "nventore voluptatibus dolorem assumenda."
         buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 1
         buffer.minor_mode?(:insert).should != nil
         insert.index.should == '1.1'
@@ -274,7 +177,7 @@ VER.spec keymap: 'vim' do
       it 'kills to end of line with <D>' do
         insert.index = '1.1'
         type 'D'
-        clipboard.should == 'ugiat eos voluptatum officia fugit ad sit qui.'
+        clipboard.should == "nventore voluptatibus dolorem assumenda."
         buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 1
         buffer.minor_mode?(:insert).should == nil
         insert.index.should == '1.1'
@@ -283,8 +186,8 @@ VER.spec keymap: 'vim' do
       it 'kills next char with <x>' do
         insert.index = '1.1'
         type 'x'
-        clipboard.should == 'u'
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 46
+        clipboard.should == 'n'
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 40
         buffer.minor_mode?(:insert).should == nil
         insert.index.should == '1.1'
       end
@@ -292,8 +195,8 @@ VER.spec keymap: 'vim' do
       it 'kills previous char with <X>' do
         insert.index = '1.1'
         type 'X'
-        clipboard.should == 'F'
-        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 46
+        clipboard.should == 'I'
+        buffer.count('1.0 linestart', '1.0 lineend', :displaychars).should == 40
         buffer.minor_mode?(:insert).should == nil
         insert.index.should == '1.0'
       end

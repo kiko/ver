@@ -1,12 +1,7 @@
 module VER
-  # A subset of Tk::Event::Data with only the properties we actually use to
-  # allow for more event history while keeping memory usage low.
-  class Event < Struct.new(:sequence, :keysym, :unicode)
-  end
-
   # The WidgetMajorMode associates a widget with a major mode.
   # It keeps a limited history of the events that arrive at [on_event].
-  # It also maintains a stack of the event sequences and tries to match
+  # It also maintains a stack of the event patterns and tries to match
   # against the keymaps of the major and minor modes.
   #
   # This class has its own list of minor modes, which can be modified and may
@@ -30,6 +25,11 @@ module VER
       establish_tag
       use(*self.major.minors)
       listen
+
+      # in case we had some keymap updates, they must have been registered by
+      # now, since otherwise we wouldn't be here.
+      # This will be called around 3 times per startup.
+      Event.done_yet?
     end
 
     def listen
@@ -40,9 +40,9 @@ module VER
       major.bound_keys
     end
 
-    # Shortcut to bind a sequence on the associated widget.
-    def bind(sequence, &block)
-      widget.bind(sequence, &block)
+    # Shortcut to bind a pattern on the associated widget.
+    def bind(pattern, &block)
+      widget.bind(pattern, &block)
     end
 
     def bind_key(key)
@@ -65,18 +65,31 @@ module VER
 
     def fake(input)
       input.scan(/<[\w-]+>|[^<>]/) do |name|
-        on_event(FakeEvent[name])
+        # get the widget that currently has focus, this might not be self.
+        path = Tk::Focus.focus
+        widget = Tk.pathname_to_widget(path)
+
+        if widget == self.widget
+          on_event(Event[name])
+          Tk.update
+        else
+          widget.type(name)
+        end
       end
     end
 
     def on_event(event)
       VER.touch
-      stack << event.sequence
-      event_history << Event.new(event.sequence, event.keysym, event.unicode)
+      stack << event.pattern
+
+      # replace with our subset
+      event = Event.new(event.pattern, event.keysym, event.unicode)
+      event_history << event
 
       return handle_reader(event) if reader && read_amount
 
-      case result = resolve(stack)
+      result = resolve(stack)
+      case result
       when Incomplete
         message result.to_s(widget)
         # don't do anything yet...
@@ -86,7 +99,7 @@ module VER
       else
         stack.clear
         message ''
-        mode, action = result
+        mode, action = *result
         widget_event = WidgetEvent.new(widget, event)
         action.call(widget_event)
         action_history << [widget_event, *result]
@@ -111,15 +124,19 @@ module VER
 
     # ignore event for now, it might be needed later
     def handle_reader(event)
+      read_amount = self.read_amount
+
       if stack.size >= read_amount
         stack.clear
-        handled = true
+
+        # before we call, we reset the state in case the reader adds a new reader.
+        reader = self.reader
+        self.reader = self.read_amount = nil
         reader.call(*event_history.last(read_amount))
+        true
       else
-        handled = false
+        false
       end
-    ensure
-      self.read_amount = self.reader = nil if handled
     end
 
     def read(amount, &reader)
@@ -129,8 +146,8 @@ module VER
       self.reader = reader
     end
 
-    def resolve(sequence)
-      major.resolve(sequence, minors)
+    def resolve(pattern)
+      major.resolve(pattern, minors)
     end
 
     def replaces(other)

@@ -4,29 +4,35 @@ module VER
   class Keymap < Struct.new(:keymap, :keys)
     module Results
       # Indicate that no result can and will be found in the keymap
-      class Impossible < Struct.new(:sequence)
+      class Impossible < Struct.new(:pattern)
         def to_s
-          stack = sequence.map{|seq| FakeEvent[seq].keysym }.join(' - ')
+          stack = pattern.map{|seq| Event[seq].keysym }.join(' - ')
           "#{stack} is undefined"
         end
       end
 
       # Indicate that no result could be found yet.
-      class Incomplete < Struct.new(:sequence, :choices)
+      class Incomplete < Struct.new(:pattern, :choices)
         def merge!(incomplete)
-          return unless sequence == incomplete.sequence
+          return unless pattern == incomplete.pattern
           choices.deep_merge!(incomplete.choices)
         end
 
         def to_s(handler)
-          stack = sequence.map{|seq| FakeEvent[seq].keysym }.join
+          stack = pattern.map{|seq| Event[seq].keysym }.join
 
           follow = choices.map{|key, action|
             case action
             when Action
               method = action.to_method(handler)
               args = [*action.invocation][1..-1]
-              signature = "#{method.receiver}.#{method.name}"
+
+              case receiver = method.receiver
+              when Class, Module
+                signature = "#{receiver}.#{method.name}"
+              else
+                signature = "#{method.receiver.class}.#{method.name}"
+              end
 
               unless args.empty?
                 signature << '(' << args.map(&:inspect).join(', ') << ')'
@@ -84,31 +90,35 @@ module VER
       self.keys = keys
     end
 
-    def []=(*sequence, action)
-      sequence = [*sequence].flatten
+    def []=(*pattern, action)
+      pattern = pattern_to_patterns(*pattern)
+
+      case existing = self[pattern]
+      when Action
+        VER.warn "Redefining %p bound to %p with %p" % [existing, pattern, action]
+      when Incomplete
+        VER.warn "%p shadows other actions bound to %p: %p" % [action, pattern, existing.choices]
+      when Impossible
+      end
+
       top = sub = MapHash.new
 
-      while key = sequence.shift
-        if key.respond_to?(:to_str)
-          canonical = FakeEvent[key.to_str].sequence
-          self.keys << canonical
-        else
-          canonical = key
-        end
+      while key = pattern.shift
+        self.keys << key if key.respond_to?(:keysym)
 
-        if sequence.empty?
-          sub[canonical] = action
+        if pattern.empty?
+          sub[key] = action
         else
-          sub = sub[canonical] = MapHash.new
+          sub = sub[key] = MapHash.new
         end
       end
 
       keymap.replace(keymap.merge(top, &MERGER))
     end
 
-    def [](*sequence)
-      sequence = [*sequence].flatten
-      remaining = sequence.dup
+    def [](*pattern)
+      pattern = [*pattern].flatten
+      remaining = pattern.dup
 
       current = keymap
       while key = remaining.shift
@@ -127,17 +137,18 @@ module VER
             when Impossible
               false
             else
-              return cvalue.combine(resolved.last)
+              mode, action = *resolved
+              return cvalue.combine(action)
             end
           end
 
-          return Impossible.new(sequence)
+          return Impossible.new(pattern)
         end
       end
 
       case current
       when MapHash # incomplete
-        Incomplete.new(sequence, current)
+        Incomplete.new(pattern, current)
       else
         current
       end
@@ -158,15 +169,20 @@ module VER
       keymap.deep_each.map{|key, value| value }
     end
 
-    def key_to_canonical(key)
-      case key
-      when /^[a-zA-Z0-9]$/
-        key
-      when /^</
-        key
-      else
-        "<#{key}>"
+    def pattern_to_patterns(*patterns)
+      result = []
+
+      patterns.flatten.each do |pattern|
+        if pattern.respond_to?(:scan)
+          pattern.scan(/<<[^>]+>>|<[^>]+>|(?!\s<)[[:print:]]/) do
+            result << Event[$&].pattern
+          end
+        else
+          result << pattern
+        end
       end
+
+      result
     end
   end
 end

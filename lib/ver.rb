@@ -13,9 +13,15 @@ require 'logger'
 require 'securerandom'
 require 'set'
 require 'tmpdir'
+
+# vendor stuff, extensions and fixes.
 require 'ver/vendor/better_pp_hash'
 require 'ver/vendor/pathname'
 require 'ver/vendor/sized_array'
+require 'ver/vendor/json_store'
+
+# 3rd party dependencies
+require 'ffi'
 
 # Small helper method that equivalent to Kernel#p but writes to log.
 # Please use this for debugging, log is at /tmp/ver/log/all.log.
@@ -42,9 +48,9 @@ module VER
   autoload :Clipboard,           'ver/clipboard'
   autoload :Entry,               'ver/entry'
   autoload :EvalCompleter,       'ver/vendor/eval_completer'
+  autoload :Event,               'ver/event'
   autoload :ExceptionView,       'ver/exception_view'
   autoload :Executor,            'ver/executor'
-  autoload :FakeEvent,           'ver/keysyms'
   autoload :Font,                'ver/font'
   autoload :Help,                'ver/help'
   autoload :HoverCompletion,     'ver/hover_completion'
@@ -53,9 +59,14 @@ module VER
   autoload :Levenshtein,         'ver/vendor/levenshtein'
   autoload :Methods,             'ver/methods'
   autoload :MiniBuffer,          'ver/minibuffer'
+  autoload :ModeResolving,       'ver/mode_resolving'
   autoload :NotebookLayout,      'ver/layout/notebook'
   autoload :PanedLayout,         'ver/layout/paned'
+  autoload :Platform,            'ver/platform'
+  autoload :Register,            'ver/register'
+  autoload :RegisterList,        'ver/register'
   autoload :Status,              'ver/status'
+  autoload :Struct,              'ver/struct'
   autoload :Syntax,              'ver/syntax'
   autoload :Text,                'ver/text'
   autoload :Textpow,             'ver/vendor/textpow'
@@ -83,7 +94,7 @@ module VER
   # the rest of the options are in config/rc.rb
   options.dsl do
     o "Fork off on startup to avoid dying with the terminal",
-      :fork, true
+      :fork, Platform.unix?
 
     o "Start hidden, useful for specs",
       :hidden, false
@@ -141,6 +152,7 @@ module VER
     pp options if $DEBUG
 
     run_maybe_forking do
+      Event.load!
       options.eventmachine ? run_em(&block) : run_noem(&block)
     end
   rescue => exception
@@ -429,53 +441,51 @@ module VER
 
   def open_session
     return unless session_base = options.session
-    basename = "#{session_base}.session.rb"
+    basename = "sessions/#{session_base}.json"
     return unless file = find_in_loadpath(basename)
 
-    begin
-      session = eval(File.read(file))
-    rescue SyntaxError => ex
-      error(ex)
-      return
-    end
+    JSON::Store.new(file, true).transaction do |session|
+      session['bookmarks'].each do |raw_bm|
+        bm = Bookmarks::Bookmark.new
+        bm.name  = raw_bm['name']
+        bm.file  = Pathname(raw_bm['file'])
+        bm.index = raw_bm['index']
+        l "Loaded %p" % [bm]
+        bookmarks << bm
+      end
 
-    session[:bookmarks].each do |raw_bm|
-      bm = Bookmarks::Bookmark.new
-      bm.name = raw_bm[:name]
-      bm.file = Pathname(raw_bm[:file])
-      bm.index = raw_bm[:index]
-      bookmarks << bm
-    end
-
-    session[:buffers].each do |buffer|
-      find_or_create_buffer(buffer[:filename], *buffer[:insert])
+      session['buffers'].each do |buffer|
+        l "Loading Buffer: %p" % [buffer]
+        find_or_create_buffer(buffer['filename'], *buffer['insert'])
+      end
     end
   end
 
+  # FIXME: there are no buffers anymore when this is called.
   def store_session
     return unless session_base = VER.options.session
-    basename = "#{session_base}.session.rb"
+    basename = "sessions/#{session_base}.json"
     session_path = loadpath.first/basename
+    session_path.parent.mkpath
 
-    session = {buffers: [], bookmarks: []}
-    buffers.each do |buffer|
-      session[:buffers] << {
-        name:     buffer.name.to_s,
-        filename: buffer.filename.to_s,
-        insert:   buffer.at_insert.to_a,
-      }
-    end
+    JSON::Store.new(session_path.to_s, true).transaction do |session|
+      buffers = self.buffers.map do |buffer|
+        l buffer: buffer
+        { 'name'     => buffer.name.to_s,
+          'filename' => buffer.filename.to_s,
+          'insert'   => buffer.at_insert.to_a, }
+      end
+      l "Storing Buffers: %p" % [buffers]
+      session['buffers'] = buffers
 
-    bookmarks.each do |bm|
-      session[:bookmarks] << {
-        name:  bm.name,
-        file:  bm.file.to_s,
-        index: bm.index,
-      }
-    end
-
-    session_path.open('w+:UTF-8') do |io|
-      io.write(session.pretty_inspect)
+      bookmarks = self.bookmarks.map do |bm|
+        l bookmark: bm
+        { 'name'  => bm.name,
+          'file'  => bm.file.to_s,
+          'index' => bm.index, }
+      end
+      l "Storing Bookmarks: %p" % [bookmarks]
+      session['bookmarks'] = bookmarks
     end
   end
 
@@ -567,7 +577,17 @@ module VER
   # a handleable error condition
   def error(*args)
     log.error(*args)
-    p(:error, *args)
+    if args.size == 1
+      arg = args.first
+      case arg
+      when Exception
+        puts "#{arg.class}: #{arg}", *arg.backtrace
+      else
+        p(:error, *args)
+      end
+    else
+      p(:error, *args)
+    end
   end
 
   # an unhandleable error that results in a program crash

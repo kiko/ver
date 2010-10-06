@@ -30,19 +30,19 @@ VER.spec do
 
     it 'returns an action for a given sequence' do
       mode = MajorMode[:spec]
-      mode.map(:kill_word, ['d', 'w'])
-      mode.map(:kill_line, ['d', 'd'])
+      mode.map(:kill_word, 'dw')
+      mode.map(:kill_line, 'dd')
 
-      action_mode, action = mode.resolve(['d', 'w'])
-      action_mode.should == mode
+      action = mode.resolve(['d', 'w'])
+      action.mode.should == mode
       action.handler.should == nil
       action.invocation.should == :kill_word
     end
 
     it 'creates an unambigous keymap' do
       mode = MajorMode[:spec]
-      mode.map(:kill_word, ['d', 'w'])
-      mode.map(:kill_line, ['d', 'd'])
+      mode.map(:kill_word, 'dw')
+      mode.map(:kill_line, 'dd')
 
       action = mode.keymap['d', 'w']
       action.handler.should == nil
@@ -55,31 +55,31 @@ VER.spec do
 
     it 'can inherit another major mode' do
       fund = MajorMode[:Fundamental]
-      fund.map(:kill_word, ['d', 'w'])
-      fund.map(:kill_line, ['d', 'd'])
+      fund.map(:kill_word, 'dw')
+      fund.map(:kill_line, 'dd')
 
       ruby = MajorMode[:Ruby]
       ruby.inherits(:Fundamental)
-      ruby.map(:preview, ['Control-c', 'Control-c'])
+      ruby.map(:preview, '<Control-c><Control-c>')
 
-      action_mode, action = ruby.resolve(['d', 'd'])
-      action_mode.should == ruby
+      action = ruby.resolve(['d', 'd'])
+      action.mode.should == fund
       action.invocation.should == :kill_line
 
-      action_mode, action = ruby.resolve(['d', 'w'])
-      action_mode.should == ruby
+      action = ruby.resolve(['d', 'w'])
+      action.mode.should == fund
       action.invocation.should == :kill_word
 
-      action_mode, action = ruby.resolve(['<Control-c>', '<Control-c>'])
-      action_mode.should == ruby
+      action = ruby.resolve(['<Control-c>', '<Control-c>'])
+      action.mode.should == ruby
       action.invocation.should == :preview
 
-      action_mode, action = fund.resolve(['d', 'd'])
-      action_mode.should == fund
+      action = fund.resolve(['d', 'd'])
+      action.mode.should == fund
       action.invocation.should == :kill_line
 
-      action_mode, action = fund.resolve(['d', 'w'])
-      action_mode.should == fund
+      action = fund.resolve(['d', 'w'])
+      action.mode.should == fund
       action.invocation.should == :kill_word
 
       action = fund.resolve(['<Control-c>', '<Control-c>'])
@@ -88,15 +88,15 @@ VER.spec do
 
     it 'may have a fallback that is invoked on impossible results' do
       mode = MajorMode[:spec]
-      mode.map(:kill_word, ['d', 'w'])
+      mode.map(:kill_word, 'dw')
       mode.missing(:insert)
 
-      action_mode, action = mode.resolve(['d', 'w'])
-      action_mode.should == mode
+      action = mode.resolve(['d', 'w'])
+      action.mode.should == mode
       action.invocation.should == :kill_word
 
-      action_mode, action = mode.resolve(['f', 'o', 'o'])
-      action_mode.should == mode
+      action = mode.resolve(['f', 'o', 'o'])
+      action.mode.should == mode
       action.invocation.should == :insert
     end
 

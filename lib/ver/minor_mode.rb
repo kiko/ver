@@ -21,6 +21,8 @@ module VER
   # part of the tree of minors of this major mode.
   class MinorMode < Struct.new(:name, :parents, :keymap, :receiver,
                                :fallback_action, :enter_action, :leave_action)
+    include Platform
+    include ModeResolving
     include Keymap::Results
 
     MODES = {}
@@ -57,32 +59,9 @@ module VER
       MODES[self.name] = self
     end
 
-    # recursively try to find the sequence in the minor mode and its parents.
-    def resolve(sequence)
-      case found = keymap[sequence]
-      when Incomplete
-        parents.each do |parent|
-          next if parent == self
-          case resolved = parent.resolve(sequence)
-          when Incomplete
-            found.merge!(resolved)
-          end
-        end
-      when Impossible
-        parents.find do |parent|
-          next if parent == self
-          found = parent.resolve(sequence)
-          !found.kind_of?(Impossible)
-        end
-      else
-        found = [self, found]
-      end
-
-      if found.kind_of?(Impossible) && fa = self.fallback_action
-        return self, fa
-      else
-        return found
-      end
+    # recursively try to find the pattern in the minor mode and its parents.
+    def resolve(pattern)
+      super(pattern, parents)
     end
 
     # Add a parent for this minor mode.
@@ -96,34 +75,28 @@ module VER
       parents.uniq!
     end
 
-    def become(other, *sequences)
-      action = Action.new([:minor_mode, self, other], receiver)
-      sequences.each{|sequence| keymap[sequence] = action }
+    def become(other, *patterns)
+      action = Action.new([:minor_mode, self, other], receiver, self)
+      patterns.each{|pattern| keymap[pattern] = action }
     end
 
-    def map(invocation, *sequences)
-      action = Action.new(invocation, receiver)
-      sequences.each{|sequence| keymap[sequence] = action }
+    def map(invocation, *patterns)
+      action = Action.new(invocation, receiver, self)
+      patterns.each{|pattern| keymap[pattern] = action }
     end
 
     def missing(invocation, &block)
-      action = Action.new(invocation, receiver)
+      action = Fallback.new(invocation, receiver, self)
       self.fallback_action = action
-
-      bound = keymap.keys.to_a
-      FakeEvent.each do |event|
-        sequence = event.sequence
-        keymap[sequence] = action unless bound.include?(sequence)
-      end
     end
 
     def enter(invocation, &block)
-      action = Action.new(invocation, receiver)
+      action = Action.new(invocation, receiver, self)
       self.enter_action = action
     end
 
     def leave(invocation, &block)
-      action = Action.new(invocation, receiver)
+      action = Action.new(invocation, receiver, self)
       self.leave_action = action
     end
 

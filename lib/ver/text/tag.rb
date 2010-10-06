@@ -46,12 +46,10 @@ module VER
         Tk.execute_only(Tk::TclString.new(code.join("\n")))
       end
 
-      # pathName tag bind tagName ?sequence? ?script? 
       def bind(*args, &block)
         buffer.tag_bind(to_tcl, *args, &block)
       end
 
-      # pathName tag cget tagName option 
       def cget(option)
         buffer.tag_cget(self, option)
       end
@@ -59,7 +57,7 @@ module VER
       # Comment all lines that the selection touches.
       # Tries to maintain indent.
       def comment
-        comment = "#{buffer.options.comment_line} "
+        comment = buffer.options.comment_line.to_s
         indent = nil
         lines = []
 
@@ -89,17 +87,15 @@ module VER
         end
       end
 
-      # pathName tag configure tagName ?option? ?value? ?option value ...? 
       def configure(*options)
         buffer.tag_configure(self, *options)
       end
 
       def copy
         chunks = ranges.map{|range| range.get }
-        Methods::Clipboard.copy(buffer, chunks.size == 1 ? chunks.first : chunks)
+        buffer.with_register{|reg| reg.value = chunks.at(1) ? chunks : chunks.first }
       end
 
-      # pathName tag delete tagName ?tagName ...? 
       def delete
         buffer.tag_delete(self)
       end
@@ -120,6 +116,14 @@ module VER
         end
       end
 
+      def encode_rot13!
+        buffer.undo_record do |record|
+          each_range do |range|
+            range.encode_rot13!(record)
+          end
+        end
+      end
+
       # Eval contents of tag and insert them into the buffer.
       def evaluate!
         file = buffer.filename
@@ -131,6 +135,10 @@ module VER
             range.last.lineend.insert("\n%s%p" % [out, res])
           end
         end
+      end
+
+      def first
+        buffer.index("#{self}.first")
       end
 
       def get
@@ -157,12 +165,23 @@ module VER
 
       def kill
         indices = []
+
         chunks = ranges.map{|range|
           indices << range.first << range.last
           range.get
         }
-        Methods::Clipboard.copy(buffer, chunks.size == 1 ? chunks.first : chunks)
+
+        # A bit of duplication, but if we use copy here we have to iterate the
+        # ranges again.
+        buffer.with_register do |register|
+          register.value = chunks.at(1) ? chunks : chunks.first
+        end
+
         buffer.delete(*indices)
+      end
+
+      def last
+        buffer.index("#{self}.last")
       end
 
       def lower(below_this = Tk::None)
@@ -173,14 +192,14 @@ module VER
       # Convert all characters within the tag to lower-case using
       # String#downcase.
       # Usually only works for alphabetic ASCII characters.
-      def lower_case
+      def lower_case!
         buffer.undo_record do |record|
           each_range do |range|
-            record.replace(*range, range.get.chomp.downcase)
+            range.lower_case!(record)
           end
         end
       end
-      alias downcase! lower_case
+      alias downcase! lower_case!
 
       def next_range(from_index, to_index = Tk::None)
         buffer.tag_nextrange(self, from_index, to_index)
@@ -224,7 +243,6 @@ module VER
         buffer.tag_ranges(self)
       end
 
-      # pathName tag remove tagName index1 ?index2 index1 index2 ...?
       def remove(index, *indices)
         buffer.tag_remove(self, index, *indices)
       end
@@ -244,16 +262,16 @@ module VER
 
       # Toggle case within the selection.
       # This only works for alphabetic ASCII characters, no other encodings.
-      def toggle_case
+      def toggle_case!
         buffer.undo_record do |record|
           each_range do |range|
-            record.replace(*range, range.get.chomp.tr('a-zA-Z', 'A-Za-z'))
+            range.toggle_case!(record)
           end
         end
       end
 
       def uncomment
-        comment = "#{buffer.options.comment_line} "
+        comment = buffer.options.comment_line.to_s
         regex = /#{Regexp.escape(comment)}/
 
         buffer.undo_record do |record|
@@ -286,17 +304,16 @@ module VER
       # Convert all characters within the tag to upper-case using
       # String#upcase.
       # Usually only works for alphabetic ASCII characters.
-      def upper_case
+      def upper_case!
         buffer.undo_record do |record|
           each_range do |range|
-            record.replace(*range, range.get.chomp.upcase)
+            range.upper_case!(record)
           end
         end
       end
-      alias upcase! upper_case
+      alias upcase! upper_case!
 
-      def wrap(count = buffer.prefix_arg)
-        width = count || 80
+      def wrap(width = buffer.prefix_count(80))
         wrapped = Methods::Control.wrap_lines_of(get, width)
         replace(wrapped.join("\n"))
       end

@@ -11,6 +11,10 @@ module VER
         # clean_line(text, :insert)
       end
 
+      def temporary(buffer, action)
+        action.to_method(buffer).call
+      end
+
       def insert_at(text, motion, *count)
         Move.send(motion, text, *count)
         text.minor_mode(:control, :insert)
@@ -79,6 +83,13 @@ module VER
       def cursor_vertical_bottom_sol(text)
         cursor_vertical_bottom(text)
         start_of_line(text)
+      end
+
+      def cursor_horizontal_center(buffer)
+        x, y, width, height = *buffer.bbox('insert')
+        line_middle = y + (height / 2) # gives less room for error?
+        buffer_middle = buffer.winfo_width / 2
+        set("@#{buffer_middle},#{y}")
       end
 
       def chdir(text)
@@ -319,7 +330,7 @@ module VER
         code = text.get('insert linestart', 'insert lineend')
         file = (text.filename || text.uri).to_s
         stdout_capture_evaluate(code, file, binding) do |res, out|
-          at_insert.lineend.insert("n%s%p" % [out, res])
+          text.at_insert.lineend.insert("\n%s%p" % [out, res])
         end
       end
 
@@ -341,13 +352,29 @@ module VER
         end
       end
 
-      def join_line_forward(text)
-        from, to = 'insert linestart', 'insert + 1 lines lineend'
-        lines = text.get(from, to)
-        text.replace(from, to, lines.gsub(/\s*\n\s*/, ' '))
+      # for some odd reason, vim likes to have arbitrary commands that reduce
+      # the argument by one if it's greater 1...
+      def join_forward(buffer, count = buffer.prefix_count)
+        count = count > 1 ? (count - 1) : count
+        buffer.undo_record do |record|
+          count.times do
+            buffer.insert = buffer.at_insert.lineend
+            record.replace('insert', 'insert + 1 chars', ' ')
+          end
+        end
       end
 
-      def join_line_backward(text)
+      def join_forward_nospace(buffer, count = buffer.prefix_count)
+        count = count > 1 ? (count - 1) : count
+        buffer.undo_record do |record|
+          count.times do
+            buffer.insert = buffer.at_insert.lineend
+            record.replace('insert', 'insert + 1 chars', '')
+          end
+        end
+      end
+
+      def join_backward(text)
         from, to = 'insert - 1 lines linestart', 'insert lineend'
         lines = text.get(from, to)
         text.replace(from, to, lines.gsub(/\s*\n\s*/, ' '))

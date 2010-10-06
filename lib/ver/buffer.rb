@@ -90,10 +90,11 @@ module VER
     end
 
     attr_reader :frame, :status, :options, :at_current, :at_insert, :at_end,
-                :theme_config, :matching_brace, :layout, :syntax, :minibuf
+                :theme_config, :matching_brace, :layout, :syntax, :minibuf,
+                :snippets, :preferences
     attr_accessor :uri, :project_root, :project_repo, :undoer, :pristine,
                   :prefix_arg, :readonly, :encoding, :filename, :at_sel,
-                  :symbolic, :locked
+                  :symbolic, :locked, :register, :skip_prefix_count_once
 
     # Hack for smoother minibuf completion
     public :binding, :local_variables, :global_variables
@@ -132,7 +133,7 @@ module VER
 
     def setup_widgets
       @status    = Status.new(frame, self)
-      @minibuf   = VER.minibuf.peer_create(frame)
+      @minibuf   = VER.minibuf.peer_create(frame, self)
 
       if options.horizontal_scrollbar
         @xbar = Tk::Tile::XScrollbar.new(frame)
@@ -170,6 +171,7 @@ module VER
       @theme_config   = nil
       @highlighter    = nil
       @pristine       = true
+      self.register   = Register['*']
       self.major_mode = :Fundamental
     end
 
@@ -198,7 +200,7 @@ module VER
     end
 
     def on_movement(event)
-      at_insert.see
+      adjust_sight
       at_sel.refresh
       @matching_brace.refresh
       sync_position_status
@@ -227,6 +229,42 @@ module VER
       unlock_uri(uri)
     ensure
       VER.defer{ VER.exit if VER.buffers.empty? }
+    end
+
+    def adjust_sight
+      see(@look_at || at_insert)
+    end
+
+    def look_at(obj)
+      @look_at = obj
+    end
+
+    # This has to be called _before_ <Destroy> is received, otherwise the Buffer
+    # is half-dead.
+    def persist_info
+      file = VER.loadpath.first/'buffer_info.json'
+      l "Persisting Buffer info into: #{file}"
+
+      JSON::Store.new(file.to_s, true).transaction do |buffer_info|
+        syntax_name = @syntax.name if @syntax
+
+        buffer_info[uri.to_s] = {
+          'insert' => index('insert').to_s,
+          'syntax' => syntax_name
+        }
+      end
+    end
+
+    def load_info
+      file = VER.loadpath.first/'buffer_info.json'
+      l "Loading Buffer info from: #{file}"
+      JSON::Store.new(file.to_s, true).transaction do |buffer_info|
+        if info = buffer_info[uri.to_s]
+          return info
+        end
+      end
+
+      return {}
     end
 
     def sync_mode_status
@@ -444,22 +482,35 @@ module VER
       after_open(nil, line, char)
     end
 
-    def after_open(syntax = nil, line = 1, char = 0)
+    def after_open(syntax = nil, line = nil, char = nil)
       @undoer = VER::Undo::Tree.new(self)
       VER.opened_file(self)
       layout.wm_title = uri.to_s
 
-      self.insert = "#{line || 1}.#{char || 0}"
+      info = load_info
+
+      if line || char
+        self.insert = "#{line || 1}.#{char || 0}"
+      else
+        self.insert = info['insert'] || '1.0'
+      end
+
       VER.buffers << self
       message "Opened #{uri}"
 
-      bind('<Map>') do
-        VER.defer do
-          syntax ? setup_highlight_for(syntax) : setup_highlight
-          apply_modeline
-        end
-        bind('<Map>'){ at_insert.see }
+      # Don't rely on the <Map> event, since it's prone to race-conditions.
+      finalize_open(syntax || info['syntax'])
+    rescue => ex
+      VER.error(ex)
+    end
+
+    def finalize_open(syntax)
+      VER.defer do
+        syntax ? setup_highlight_for(syntax) : setup_highlight
+        load_preferences
+        apply_modeline
       end
+      bind('<Map>'){ adjust_sight }
     end
 
     def lock_uri(uri, &block)
@@ -530,7 +581,7 @@ Close this buffer or continue with caution.
 
     def unlock_uri(uri = self.uri)
       return unless locked?
-      uri_lockfile(uri).rm
+      uri_lockfile(uri).rm_f
     end
 
     def uri_lockfile(uri = self.uri)
@@ -630,7 +681,10 @@ Close this buffer or continue with caution.
     end
 
     def close
-      may_close{ layout.destroy }
+      may_close do
+        persist_info
+        layout.destroy
+      end
     end
 
     def touch!(*indices)
@@ -662,11 +716,34 @@ Close this buffer or continue with caution.
       end
     end
 
+    def change_register
+      major_mode.read(1) do |name|
+        if unicode = name.unicode
+          if unicode.empty?
+            warn "invalid name for register: %p" % [name]
+          else
+            self.register = Register[unicode]
+          end
+        else
+          warn "invalid name for register: %p" % [name]
+        end
+      end
+    end
+
+    def with_register
+      @with_register_level ||= 0
+      @with_register_level += 1
+      value = yield(register)
+      @with_register_level -= 1
+    ensure
+      self.register = Register['*'] if @with_register_level == 0
+    end
+
     def update_prefix_arg
       numbers = []
 
       events.reverse_each do |event|
-        break unless event.sequence =~ /^(\d+)$/
+        break unless event.keysym =~ /^(\d+)$/
         numbers << $1
       end
 
@@ -678,14 +755,24 @@ Close this buffer or continue with caution.
     end
 
     # Same as [prefix_arg], but returns 1 if there is no argument.
+    #
+    # The return value in case there is no argument can be changed by passing
+    # a +default+ argument.
+    #
     # Useful for [Move] methods and the like.
     # Please note that calling this method is destructive.
     # It will reset the state of the prefix_arg in order to avoid persistent
     # arguments.
     # So use it only once while your action is running, and store the result in a
     # variable if you need it more than once.
-    def prefix_count
-      count = prefix_arg || 1
+    def prefix_count(default = 1)
+      if skip_prefix_count_once
+        self.skip_prefix_count_once = false
+        update_prefix_arg
+        return default
+      end
+
+      count = prefix_arg || default
       update_prefix_arg
       count
     end
@@ -778,6 +865,10 @@ Close this buffer or continue with caution.
       end
     end
 
+    def at_eol?
+      at_insert == at_insert.lineend
+    end
+
     # OK, finally found the issue.
     #
     # the implementation of tk::TextUpDownLine is smart, but not smart enough.
@@ -798,8 +889,8 @@ Close this buffer or continue with caution.
     # This is an issue we can fix if we "forget" the @udl_pos_orig after a
     # user-defined maximum delta (something around 200 should do), will
     # implement that on demand.
-    def up_down_line(count)
-      insert = index(:insert)
+    def up_down_displayline(count)
+      insert = at_insert
 
       @udl_pos_orig = insert if @udl_pos_prev != insert
 
@@ -811,6 +902,27 @@ Close this buffer or continue with caution.
       target
     end
 
+    # This method goes up and down lines, not taking line wrapping into account.
+    # To go a line down, pass 1, to go one up -1, you get the idea.
+    # Tries to maintain the same char position across lines.
+    def up_down_line(count)
+      insert = at_insert
+
+      # if the last movement was not done by up_down_*, set new origin.
+      @udl_pos_orig = insert if @udl_pos_prev != insert
+
+      # count lines between origin and current insert position.
+      lines = count(@udl_pos_orig, insert, :lines)
+      # now get the target count lines below.
+      target = index("#@udl_pos_orig + #{lines + count} lines")
+
+      @udl_pos_prev = target
+
+      # if target has the same char pos as the previous one, use it as origin.
+      @udl_pos_orig = target if target.char == @udl_pos_orig.char
+      target
+    end
+
     def setup_highlight
       setup_highlight_for(Syntax.from_filename(filename)) if filename
     end
@@ -818,6 +930,7 @@ Close this buffer or continue with caution.
     def setup_highlight_for(syntax)
       return if encoding == Encoding::BINARY
       return unless syntax
+      syntax = Syntax.new(syntax) unless syntax.is_a?(Syntax)
 
       self.syntax = syntax
       VER.cancel_block(@highlighter)
@@ -875,8 +988,30 @@ Close this buffer or continue with caution.
       name = syntax.name
       return unless file = VER.find_in_loadpath("preferences/#{name}.rb")
       @preferences = eval(file.read)
+      apply_preferences
     rescue Errno::ENOENT, TypeError => ex
       VER.error(ex)
+    end
+
+    def apply_preferences
+      return unless @preferences
+
+      @preferences.each do |preference|
+        next unless preference[:name] == "Comments"
+        if settings = preference[:settings]
+          if shell_variables = settings[:shellVariables]
+            shell_variables.each do |variable|
+              name, value = variable.values_at(:name, :value)
+              ENV[name] = value
+
+              case name
+              when 'TM_COMMENT_START'
+                options.comment_line = value
+              end
+            end
+          end
+        end
+      end
     end
 
     def handle_pending_syntax_highlights
