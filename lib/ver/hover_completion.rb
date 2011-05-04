@@ -133,7 +133,7 @@ module VER
         y: y,
         height: height,
         width: width,
-        in: parent,
+        # in: parent,
         anchor: "#{hemisphere}#{side}"
       )
     end
